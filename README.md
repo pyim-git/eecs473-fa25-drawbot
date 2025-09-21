@@ -1,7 +1,7 @@
 
-  # Robot Companion Web App
+  # DrawBot Web App
 
-  This is a code bundle for Robot Companion Web App. The original project is available at https://www.figma.com/design/oLELNfNARINjkW4a7Yk8Eo/Robot-Companion-Web-App.
+  This is a code bundle for DrawBot Web App. The original project is available at https://www.figma.com/design/oLELNfNARINjkW4a7Yk8Eo/Robot-Companion-Web-App.
 
   ## Running the code
 
