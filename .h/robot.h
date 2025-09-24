@@ -40,6 +40,4 @@
     void stop();                                // stop robot path - emergency stop
 
     int distToSteps(float dist); // convert travel distance to motor's steps
-
-
 #endif
