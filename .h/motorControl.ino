@@ -16,14 +16,37 @@ It is designed to work with a motor driver that uses 8 GPIO pins to control 4 mo
 
 setup()
 {
-    ESP32MotorControl motorControl;  // Create an instance of the motor control class
-    motorControl.attachMotors(DIR_PIN_1, STEP_PIN_1, DIR_PIN_2, STEP_PIN_2, DIR_PIN_3, STEP_PIN_3, DIR_PIN_4, STEP_PIN_4);
-
+    StepperControl motorControl(DIR_PIN_1, STEP_PIN_1, DIR_PIN_2, STEP_PIN_2, DIR_PIN_3, STEP_PIN_3, DIR_PIN_4, STEP_PIN_4);
+    motorControl.setSpeed(100); // Set speed to 100 RPM
 }
 
 loop()
 {
-    // Main code can go here if needed
+    // Move in a square: forward, right, forward, right, etc.
+    static int step = 0;
+    static unsigned long lastMoveTime = 0;
+    const unsigned long moveDuration = 1000; // ms per side
+
+    motorControl.update();
+
+    if (millis() - lastMoveTime > moveDuration) {
+        switch (step % 4) {
+            case 0: // Move forward
+                motorControl.forward();
+                break;
+            case 1: // Turn right
+                motorControl.right(90);
+                break;
+            case 2: // Move forward
+                motorControl.forward();
+                break;
+            case 3: // Turn right
+                motorControl.right(90);
+                break;
+        }
+        step++;
+        lastMoveTime = millis();
+    }
 }
 
 
