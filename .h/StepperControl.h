@@ -4,6 +4,7 @@
 
 #define STEPS 200  // Number of steps per revolution for the stepper motor
 #include "Stepper.h"
+#include <stdint.h>
 
 // library interface description
 class StepperControl {
@@ -18,9 +19,9 @@ class StepperControl {
 
     void backwards();
 
-    void left();
+    void left(uint8_t degree);
 
-    void right();
+    void right(uint8_t degree);
 
     void stop();
 
@@ -34,14 +35,6 @@ class StepperControl {
 
     // degree
     long degree;
-
-    // direction
-    bool forward;
-    bool backwards;
-    bool left;
-    bool right;
-    bool rotateClockwise;
-    bool rotateCounterClockwise;
 
     // stepper motor objects
     Stepper motor1(STEPS, 0, 0); // Placeholder pins, will be set in constructor
