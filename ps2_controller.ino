@@ -1,17 +1,9 @@
 #include "PS2X_lib.h"  //for v1.6
-#include "Stepper.h"
 
 PS2X ps2x; // create PS2 Controller Class
-
-//right now, the library does NOT support hot pluggable controllers, meaning 
-//you must always either restart your Arduino after you conect the controller, 
-//or call config_gamepad(pins) again after connecting the controller.
 int error = 0; 
 byte type = 0;
 byte vibrate = 0;
-
-// create stepper control class object
-StepperControl motors();
 
 void setup(){
   // *** START CONTROLLER INIT ***
@@ -69,31 +61,31 @@ void loop(){
     if (ps2x.Analog(PSS_LX) == 127 && ps2x.Analog(PSS_LY) == 128) {
       Serial.println("Nothing to see here...");
       // stop robot in place
-      // stop();
+      stop();
     } // if ..LEFT STICK in idle position
 
     else if (ps2x.Analog(PSS_LX) > 127 && ps2x.Analog(PSS_LY) == 128) {  // RIGHT
       Serial.println("Moving right!");
       // move robot right
-      // right();
+      right();
     } // elif ..LEFT STICK pointing right
 
     else if (ps2x.Analog(PSS_LX) < 127 && ps2x.Analog(PSS_LY) == 128) { // LEFT
       Serial.println("Moving left!");
       // move robot left
-      // left();
+      left();
     } // elif ..LEFT STICK pointing left
 
     else if (ps2x.Analog(PSS_LX) == 127 && ps2x.Analog(PSS_LY) < 128) { // FORWARD
       Serial.println("Moving forward!");
       // move robot forwards
-      // forward();
+      forward();
     } // elif ..LEFT STICK pointing up
 
     else if (ps2x.Analog(PSS_LX) == 127 && ps2x.Analog(PSS_LY) > 128) { // BACKWARD
       Serial.println("Moving backward!");
       // move robot backwards
-      // backwards();
+      backwards();
     } // elif ..LEFT STICK pointing down
   } // if ..START button is being held
 
@@ -158,94 +150,6 @@ void loop(){
     // rotate(1);
   } // if ..RIGHT trigger pressed
 
-  /* SLIGHT MOVEMENTS
-    // else if (ps2x.Analog(PSS_LX) > 127 && ps2x.Analog(PSS_LY) < 128) {   // FORWARD RIGHT
-    //   Serial.println("Moving forward right!");
-    //   // TODO: insert motor controls
-      
-    // } // if ..LEFT STICK pointing up right
-
-    // else if (ps2x.Analog(PSS_LX) > 127 && ps2x.Analog(PSS_LY) > 128) {   // BACKWARD RIGHT
-    //   Serial.println("Moving backward right!");
-    //   // TODO: insert motor controls
-    // } // elif ..LEFT STICK pointing down right
-
-    else if (ps2x.Analog(PSS_LX) < 127 && ps2x.Analog(PSS_LY) < 128) {   // FORWARD LEFT
-      Serial.println("Moving forward left!");
-      // TODO: insert motor controls
-    } // elif ..LEFT STICK pointing up left
-
-    else if (ps2x.Analog(PSS_LX) < 127 && ps2x.Analog(PSS_LY) > 128) {   // BACKWARD LEFT
-      Serial.println("Moving backward left!");
-      // TODO: insert motor controls
-    } // elif ..LEFT STICK pointing down left
-  */
-
   // delayyyyy
   delay(50);
 }
-
-// *** EXAMPLE CODE!!! ***
-    /*
-    if(ps2x.Button(PSB_START)) {                   //will be TRUE as long as button is pressed
-      // Serial.println("Start is being held");
-    }
-    if(ps2x.Button(PSB_SELECT)) {
-      // Serial.println("Select is being held");
-    }
-    if(ps2x.Button(PSB_PAD_UP)) {         //will be TRUE as long as button is pressed
-      // Serial.println("UP is being held");
-    }
-    if(ps2x.Button(PSB_PAD_RIGHT)){
-      // Serial.println("Right is being held");
-    }
-    if(ps2x.Button(PSB_PAD_LEFT)){
-      // Serial.println("LEFT is being held");
-    }
-    if(ps2x.Button(PSB_PAD_DOWN)){
-      // Serial.println("DOWN is being held");
-    }
-    
-    if (ps2x.NewButtonState())               //will be TRUE if any button changes state (on to off, or off to on)
-    {
-        if(ps2x.Button(PSB_L3))
-          Serial.println("L3 pressed");
-        if(ps2x.Button(PSB_R3))
-          Serial.println("R3 pressed");
-        if(ps2x.Button(PSB_L2))
-          Serial.println("L2 pressed");
-        if(ps2x.Button(PSB_R2))
-          Serial.println("R2 pressed");
-    }   
-         
-    if(ps2x.ButtonPressed(PSB_RED))             //will be TRUE if button was JUST pressed
-          // Serial.println("Circle just pressed");
-
-    if(ps2x.ButtonReleased(PSB_RED))             //will be TRUE if button was JUST released
-          // Serial.println("Circle just released"); 
-
-
-    if(ps2x.ButtonPressed(PSB_PINK))             //will be TRUE if button was JUST pressed
-          // Serial.println("Square just pressed");
-                  
-    if(ps2x.ButtonReleased(PSB_PINK))             //will be TRUE if button was JUST released
-          // Serial.println("Square just released");     
-
-    if(ps2x.ButtonPressed(PSB_GREEN)) {             //will be TRUE if button was JUST pressed
-          // Serial.println("Triangle just pressed");
-    }
-
-    if(ps2x.ButtonReleased(PSB_GREEN)) {             //will be TRUE if button was JUST released
-      // Serial.println("Triangle just released");   
-    }
-
-    if(ps2x.ButtonPressed(PSB_BLUE))
-      // Serial.println("X just pressed"); 
-                  
-    if(ps2x.ButtonReleased(PSB_BLUE))
-      // Serial.println("X just released");   
-    }
-         
-    //if(ps2x.NewButtonState(PSB_BLUE))            //will be TRUE if button was JUST pressed OR released
-    //     Serial.println("X just changed");    
-    */
