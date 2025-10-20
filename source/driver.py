@@ -14,7 +14,7 @@ from visual import *
 # Setup directories
 input_folder = "../data"
 output_folder = "../output"
-src_file = "shapes.png"
+src_file = "alphabets.png"
 output = "gcode.out"
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
@@ -46,7 +46,7 @@ class GcodeConverter:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
 
-        _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
+        _, binary = cv2.threshold(gray, 220, 255, cv2.THRESH_BINARY_INV)
         
         # clean up noises and blurs
         kernel = np.ones((3,3), np.uint8)
@@ -54,33 +54,61 @@ class GcodeConverter:
         
         return img, binary
     
+    """sort contours from top to bottom, left to right"""
+    def sort_contours(self, contours, row_height_threshold=50):
+        # Get the height and width for each contour 
+        bounding_boxes = [cv2.boundingRect(cnt) for cnt in contours]
+        
+        # sorts the contours based on increasing order of Y coordinates (top to bottom)
+        contours_with_boxes = list(zip(contours, bounding_boxes))
+        contours_with_boxes.sort(key=lambda x: x[1][1])  
+        
+        # Group contours into rows
+        rows = []
+        current_row = []
+        current_y = contours_with_boxes[0][1][1] if contours_with_boxes else 0
+        
+        for cnt, (x, y, w, h) in contours_with_boxes:
+            if abs(y - current_y) > row_height_threshold:
+                # New row if new contour's y coordinate is higher than current row
+                if current_row:
+                    rows.append(current_row)
+                current_row = [(cnt, (x, y, w, h))]
+                current_y = y
+            else:
+                # Same row 
+                current_row.append((cnt, (x, y, w, h)))
+        
+        if current_row:
+            rows.append(current_row)
+        
+        sorted_contours = []
+        sorted_boxes = []
+        
+        # Sort by increasing order of X within the same row
+        for row in rows:
+            row.sort(key=lambda x: x[1][0])  
+            for cnt, box in row:
+                sorted_contours.append(cnt)
+                sorted_boxes.append(box)
     
+        return sorted_contours, sorted_boxes
 
-    """Sorts the contours: Path goes left->right, top->bottom"""
-    def optimize_path(self, contours):
-        if contours is None or len(contours) == 0:
-            return contours
-        
-        contours_list = list(contours)
-        contours_list.sort(key=lambda c: (cv2.boundingRect(c)[1], cv2.boundingRect(c)[0]))
-        
-        return contours_list
 
     """Write gcode to output file"""
     def image_to_gcode(self, image, output_file):
         original_img, binary_img = self.preprocess(image)
         
-        # Find contours
+        # Find contours and sort it
         contours, _ = cv2.findContours(binary_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE) 
-        #contours = [c for c in contours if cv2.contourArea(c) > 100]
-        #contours = simplify_line(contours)
+        contours, _= self.sort_contours(contours)
+        #contours = [c for c in contours if cv2.contourArea(c) > 100]  # can be used to filter out small contours
+
 
         # Open file for writing
         with open(output_file, 'w') as f:
             f.write("G90\n")  # Move to origin (0,0) at top left corner 
 
-            # current path order: left to right, top to bottom
-            contours = self.optimize_path(contours)
             print(f"Found {len(contours)} contours")
 
             for i, contour in enumerate(contours):
@@ -94,7 +122,7 @@ class GcodeConverter:
                 if distance < 5.0:  # if distance between start and end is close, close the path
                     isClosed = True
             
-                # # simplify the points in the contour (adjustable for shape precision)
+                # simplify the points in the contour (adjustable for shape precision)
                 epsilon = 0.002 * cv2.arcLength(contour, True)
                 simplified = cv2.approxPolyDP(contour, epsilon, True)
                 points = simplified.reshape(-1, 2)
