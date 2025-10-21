@@ -1,7 +1,10 @@
 import matplotlib.pyplot as plt
 import re
 
-def extract_g1_coordinates(gcode_file_path):
+
+
+
+def extract_points(gcode_file_path):
     """
     Extract only X,Y coordinates from G1 commands in G-code file
     
@@ -20,7 +23,7 @@ def extract_g1_coordinates(gcode_file_path):
                 contour_num = contour_match.group(1)
                 print(f"contour number: {contour_num}")
             
-            # # Only process G1 commands
+            # process all points
             if line.startswith('G1') or line.startswith('G0'):                    
                 # Extract X and Y coordinates using regex
                 x_match = re.search(r'X([-\d.]+)', line)
@@ -53,7 +56,7 @@ def extract_g1_coordinates(gcode_file_path):
 def visualize_g1_coordinates(gcode_file_path):
 
     # Extract all points
-    all_points, g0_points = extract_g1_coordinates(gcode_file_path)
+    all_points, g0_points = extract_points(gcode_file_path)
     if not all_points:
         print("No G1 coordinates found in the file")
         return []
@@ -107,7 +110,6 @@ def visualize_g1_coordinates(gcode_file_path):
 
     
 
-  
     # # Plot G0 points (the starting point for each contour)
     plt.plot(x_g0, y_g0, 'k^', markersize = 8, alpha = 0.7, label = 'Start Point of Contour (in order)')
     
