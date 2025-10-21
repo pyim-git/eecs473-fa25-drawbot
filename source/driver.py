@@ -9,11 +9,15 @@ import math
 from visual import *
 #from simplify_points import *
 from skimage.morphology import medial_axis, skeletonize
+import pytesseract
+from scipy.spatial import distance
+
+
 
 # Setup directories
 input_folder = "../data"
 output_folder = "../output"
-src_file = "alphabets.png"
+src_file = "letters.png"
 output = "gcode.out"
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
@@ -43,60 +47,24 @@ class GcodeConverter:
 
         # TO_DO: use a mask for processing 3 different color threshold 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5,5), 0)
 
-
+        #_, binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2 )
         _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
  
 
-        # Use smaller kernel, fewer iterations
-        kernel = np.ones((3, 3), np.uint8)  # Much smaller
-        binary = cv2.dilate(binary, kernel, iterations=1)  # Just onc
+        # Connect small gaps to get smoother shapes
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-        # Skeletonize to get center lines
-        binary_bool = binary > 0
+        # Skeletonize to get center lines (thinning bold lines to get single line apth)
+        binary_bool = cleaned > 0
         skeleton, _ = medial_axis(binary_bool, return_distance=True)
-        cleaned = (skeleton * 255).astype(np.uint8)
+        skeleton = (skeleton * 255).astype(np.uint8)
+
+        return img, skeleton
 
 
-
-        return img, cleaned
-    
-
-
-    def filter_duplicates(self, contours, min_distance=1):
-        """
-        Remove contours whose bounding boxes are too close
-        """
-        if len(contours) <= 1:
-            return contours
-        
-
-        bounding_boxes = [cv2.boundingRect(cnt) for cnt in contours]
-        
-        unique_contours = []
-        used_indices = set()
-        
-        for i, (x1, y1, w1, h1) in enumerate(bounding_boxes):
-            if i in used_indices:
-                continue
-                
-            unique_contours.append(contours[i])
-            used_indices.add(i)
-            
-            for j, (x2, y2, w2, h2) in enumerate(bounding_boxes):
-                if j not in used_indices:
-                    # Calculate center distance
-                    cx1, cy1 = x1 + w1/2, y1 + h1/2
-                    cx2, cy2 = x2 + w2/2, y2 + h2/2
-                    distance = np.sqrt((cx1 - cx2)**2 + (cy1 - cy2)**2)
-                    
-                    if distance < min_distance:
-                        used_indices.add(j)
-                        print(f"Removed nearby contour {j} (distance: {distance:.1f})")
-        
-        return unique_contours
-    
-  
     """sort contours from top to bottom, left to right"""
     def sort_contours(self, contours, row_height_threshold=50):
         # Get the height and width for each contour 
@@ -138,17 +106,93 @@ class GcodeConverter:
         return sorted_contours, sorted_boxes
 
 
+ 
+
+    """Removes obvious parent-child duplicates"""
+    def remove_duplicates(self, contours, hierarchy):
+        if hierarchy is None:
+            return contours
+        
+        hierarchy = hierarchy[0]
+        keep_indices = []
+        
+        for i in range(len(contours)):
+            parent_idx = hierarchy[i][3]
+            
+            # Keep all parent contours
+            if parent_idx == -1:
+                keep_indices.append(i)
+                continue
+            
+            # For child contours, check if they're duplicates
+            parent_contour = contours[parent_idx]
+            child_contour = contours[i]
+            
+            # bbox-based duplicate check
+            if not self.is_bbox_duplicate(parent_contour, child_contour):
+                keep_indices.append(i)
+        
+        return [contours[i] for i in keep_indices]
+
+
+    """Check for parent/child duplicates in the hierarchy by comparing their bounding-box"""
+    def is_bbox_duplicate(self, parent, child):
+        px, py, pw, ph = cv2.boundingRect(parent)
+        cx, cy, cw, ch = cv2.boundingRect(child)
+        
+        # Calculate overlap and size ratios
+        overlap_x = max(0, min(px + pw, cx + cw) - max(px, cx))
+        overlap_y = max(0, min(py + ph, cy + ch) - max(py, cy))
+        overlap_area = overlap_x * overlap_y
+        
+        parent_area = pw * ph
+        child_area = cw * ch
+        
+        # If child mostly overlaps parent and has similar size, it's a duplicate
+        overlap_ratio = overlap_area / child_area if child_area > 0 else 0
+        size_ratio = child_area / parent_area if parent_area > 0 else 0
+        
+        return overlap_ratio > 0.8 and size_ratio > 0.6
+
+
+    """Remove close points after approxPolyDP"""
+    def remove_close_points(self, points, min_distance=3.0):
+        if len(points) < 3:
+            return points
+        
+        filtered_points = [points[0]]  # Always keep first point
+        
+        for i in range(1, len(points)):
+            current_point = points[i]
+            last_kept_point = filtered_points[-1]
+            
+            distance = np.sqrt(np.sum((current_point - last_kept_point) ** 2))
+            
+            if distance >= min_distance:
+                filtered_points.append(current_point)
+            # else: skip this point (too close)
+
+        return np.array(filtered_points)
+
+
+
     """Write gcode to output file"""
-    def image_to_gcode(self, image_path, output_file, threshold_Closed = 0.3, precision=0.005):
+    def image_to_gcode(self, image_path, output_file, threshold_Closed = 0.3, precision=0.007):
         _, binary_img = self.preprocess(image_path)
 
-        # Find contours and sort it
-        contours_org, _ = cv2.findContours(binary_img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        contours = self.filter_duplicates(contours_org)
+        # Find contours using RETR_TREE (detects nested contours)
+        contours, hierarchy = cv2.findContours(binary_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
 
-        contours = [c for c in contours if len(c) > 5]  # filter ouxt small contours
+         # filter out small contours
+        contours = [c for c in contours if len(c) > 3] 
+
+        # remove inner regions that are almost identical to the parent in the hierarchy
+        contours = self.remove_duplicates(contours, hierarchy)
+
+        # sort the contours from left to right, top to bottom
         contours, _ = self.sort_contours(contours)
 
+      
         # Open file for writing
         with open(output_file, 'w') as f:
             f.write("G90\n")  # Move to origin (0,0) at top left corner 
@@ -157,28 +201,29 @@ class GcodeConverter:
 
             for i, contour in enumerate(contours):
                 # check if the contour is closed or open path. 
-                all_points = contour.reshape(-1, 2) 
-                points = all_points
-                start = all_points[0]
-                end = all_points[-1]
+                points = contour.reshape(-1, 2) 
+                start = points[0]
+                end = points[-1]
                 distance = np.linalg.norm(start - end)
 
-                # compare the distance to contour size
+                # if distance between start and end is close, close the path
                 x, y, w, h = cv2.boundingRect(contour)
                 contour_size = np.linalg.norm([w, h])
                 threshold = contour_size * threshold_Closed
                 isClosed = False
                 if distance < threshold:  
-                    isClosed = True     # if distance between start and end is close, close the path
+                    isClosed = True     
             
                 # simplify the points in the contour 
                 perimeter = cv2.arcLength(contour, True)
-                epsilon = precision * perimeter   #(adjustable for shape precision)
+                epsilon = precision * perimeter         # (adjustable for shape precision)
                 simplified = cv2.approxPolyDP(contour, epsilon, True)
                 points = simplified.reshape(-1, 2)
 
                 if len(points) < 2:
                     continue 
+
+                points = self.remove_close_points(points)   # remove close points after simplification
 
                 f.write(f"Contour {i+1}\n")
                 
@@ -212,6 +257,7 @@ def main():
         output_file = converter.image_to_gcode(image_path, f"{output_folder}/{output}")
         print(f"G-code saved to: {output_file}")
         visualize_g1_coordinates(output_file)
+
 
     except Exception as e:
         print(f"Error with custom image: {e}")
