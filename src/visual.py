@@ -3,7 +3,6 @@ import re
 
 
 
-
 def extract_points(gcode_file_path):
     """
     Extract only X,Y coordinates from G1 commands in G-code file
@@ -53,7 +52,7 @@ def extract_points(gcode_file_path):
 
 
 """Visualize g-code"""
-def visualize_g1_coordinates(gcode_file_path):
+def visualize_g1_coordinates(gcode_file_path, output_file):
 
     # Extract all points
     all_points, g0_points = extract_points(gcode_file_path)
@@ -104,14 +103,14 @@ def visualize_g1_coordinates(gcode_file_path):
                 y_vals = [p[1] for p in points]
 
                 plt.plot(x_vals, y_vals, 'b-', linewidth=2, alpha=0.7)
-                plt.plot(x_vals, y_vals, 'ro', markersize=4, alpha=0.7)
+                #plt.plot(x_vals, y_vals, 'ro', markersize=4, alpha=0.7)
                 current_line += 1
                 points.clear()
 
     
 
     # # Plot G0 points (the starting point for each contour)
-    plt.plot(x_g0, y_g0, 'k^', markersize = 8, alpha = 0.7, label = 'Start Point of Contour (in order)')
+    #plt.plot(x_g0, y_g0, 'k^', markersize = 8, alpha = 0.7, label = 'Start Point of Contour (in order)')
     
     # Mark first and last point of robot path
     plt.plot(x_all[0], y_all[0], 'go', markersize=10, markeredgecolor='black', label='Start')
@@ -125,13 +124,13 @@ def visualize_g1_coordinates(gcode_file_path):
     plt.gca().invert_yaxis() # flip the y axis
     plt.xlabel('X Coordinate')
     plt.ylabel('Y Coordinate')
-    plt.title(f'Gcode Visualization: {gcode_file_path}\n({len(all_points)} points)')
+    plt.title(f'Robot Drawing Path: {gcode_file_path}\n({len(all_points)} points)')
     plt.grid(True, alpha=0.3)
     plt.axis('equal')
     plt.legend()
     
     plt.tight_layout()
-    plt.savefig("gcode_plot.png") 
+    plt.savefig("../output/"f"{output_file}") 
     plt.show()
 
     

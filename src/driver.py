@@ -4,12 +4,10 @@ import os
 import cv2
 import numpy as np
 import pdb
-#from sklearn.neighbors import NearestNeighbors
 import math
 from visual import *
-#from simplify_points import *
 from skimage.morphology import medial_axis, skeletonize
-import pytesseract
+import pytesseract    # for text identification (to be implemented)
 from scipy.spatial import distance
 
 
@@ -17,14 +15,17 @@ from scipy.spatial import distance
 # Setup directories
 input_folder = "../data"
 output_folder = "../output"
-src_file = "letters.png"
-output = "gcode.out"
+src_file = "my_img.png"
+gcode_file = src_file.rsplit('.', 1)[0] + ".gcode"
+gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
+
+
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
 # user-configurable drawing dimension in pixels
-INPUT_WIDTH = 500 
-INPUT_HEIGHT = 500
+INPUT_WIDTH = 1000
+INPUT_HEIGHT = 1000
 
  
 
@@ -254,10 +255,9 @@ def main():
     try:
  
         image_path = f"{input_folder}/{src_file}" 
-        output_file = converter.image_to_gcode(image_path, f"{output_folder}/{output}")
+        output_file = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file}")
         print(f"G-code saved to: {output_file}")
-        visualize_g1_coordinates(output_file)
-
+        visualize_g1_coordinates(output_file, gcode_plotfile)
 
     except Exception as e:
         print(f"Error with custom image: {e}")

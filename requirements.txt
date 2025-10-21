@@ -1,0 +1,6 @@
+opencv-python
+svgpathtools
+scipy
+cairosvg
+
+# install potrace

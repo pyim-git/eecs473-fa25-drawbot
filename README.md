@@ -1,0 +1,4 @@
+libaries used
+openCV
+
+
