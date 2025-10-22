@@ -15,7 +15,7 @@ from scipy.spatial import distance
 # Setup directories
 input_folder = "../data"
 output_folder = "../output"
-src_file = "gray_colored.png"
+src_file = "pi.png"
 gcode_file = src_file.rsplit('.', 1)[0] + ".gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
@@ -157,7 +157,7 @@ class GcodeConverter:
 
 
     """Remove close points after approxPolyDP"""
-    def remove_close_points(self, points, min_distance=3.0):
+    def remove_close_points(self, points, min_distance=5.0): # adjustable min_distance threshold
         if len(points) < 3:
             return points
         
@@ -169,7 +169,7 @@ class GcodeConverter:
             
             distance = np.sqrt(np.sum((current_point - last_kept_point) ** 2))
             
-            if distance >= min_distance:
+            if distance >= min_distance or (i == len(points) - 1):
                 filtered_points.append(current_point)
             # else: skip this point (too close)
 
@@ -229,15 +229,15 @@ class GcodeConverter:
                 f.write(f"Contour {i+1}\n")
                 
                 # Move to first point (marker up)
-                f.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
+                f.write(f"G0 X{points[0][0]} Y{points[0][1]}\n")
                 
                 # Marker down, draw the contour
                 f.write(f"{self.M_DOWN}\n")
                 for point in points[1:]:
-                    f.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
+                    f.write(f"G1 X{point[0]} Y{point[1]}\n")
 
                 if isClosed:      # connect end to start if closed path
-                    f.write(f"G1 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
+                    f.write(f"G1 X{points[0][0]} Y{points[0][1]}\n")
 
                 f.write(f"{self.M_UP}\n")
                 f.write("\n")
@@ -257,7 +257,7 @@ def main():
         image_path = f"{input_folder}/{src_file}" 
         output_file = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file}")
         print(f"G-code saved to: {output_file}")
-        visualize_g1_coordinates(output_file, gcode_plotfile)
+        visualize_gcode(output_file, gcode_plotfile)
 
     except Exception as e:
         print(f"Error with custom image: {e}")
