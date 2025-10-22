@@ -117,9 +117,9 @@ def visualize_g1_coordinates(gcode_file_path, output_file):
     plt.plot(x_all[-1], y_all[-1], 'gs', markersize=10, markeredgecolor='black', label='End')
     
     # Add point labels for all g0 points
-    for i, (x, y) in enumerate(g0_points):  
-        plt.annotate(f'P{i+1}', (x, y), xytext=(5, 5), textcoords='offset points', 
-                    fontsize=8, alpha=0.7)
+    #for i, (x, y) in enumerate(g0_points):  
+       # plt.annotate(f'P{i+1}', (x, y), xytext=(5, 5), textcoords='offset points', 
+                   # fontsize=8, alpha=0.7)
     
     plt.gca().invert_yaxis() # flip the y axis
     plt.xlabel('X Coordinate')

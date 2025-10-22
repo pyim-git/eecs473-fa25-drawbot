@@ -15,7 +15,7 @@ from scipy.spatial import distance
 # Setup directories
 input_folder = "../data"
 output_folder = "../output"
-src_file = "my_img.png"
+src_file = "gray_colored.png"
 gcode_file = src_file.rsplit('.', 1)[0] + ".gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
@@ -24,8 +24,8 @@ if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
 # user-configurable drawing dimension in pixels
-INPUT_WIDTH = 1000
-INPUT_HEIGHT = 1000
+INPUT_WIDTH = 1500
+INPUT_HEIGHT = 1500
 
  
 
