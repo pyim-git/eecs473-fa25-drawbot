@@ -15,7 +15,7 @@ from scipy.spatial import distance
 # Setup directories
 input_folder = "../data"
 output_folder = "../output"
-src_file = "gray_colored.png"
+src_file = "text.png"
 gcode_file = src_file.rsplit('.', 1)[0] + ".gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
@@ -49,20 +49,20 @@ class GcodeConverter:
         # TO_DO: use a mask for processing 3 different color threshold 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-        #determine which filter to use based on image quality, Guassian for poorer quality
+        # determine which filter to use based on image quality, Guassian for poorer quality. filter can make image worse
         #blurred = cv2.GaussianBlur(gray, (5,5), 0)
-        blurred = cv2.bilateralFilter(gray, 9, 75, 75)
+        #blurred = cv2.bilateralFilter(gray, 9, 75, 75)
 
         # Preferably use threshold. adaptiveThreshold is for photos with poor lighting
         #_, binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2 )
-        _, binary = cv2.threshold(blurred, 150, 255, cv2.THRESH_BINARY_INV)
+        _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
  
 
         # Connect small gaps to get smoother shapes
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-        # better thinning function! (smoother, but remove details)
+        # smooth thinning but removes minor details
         skeleton = cv2.ximgproc.thinning(cleaned.astype(np.uint8), thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
 
         return img, skeleton
@@ -118,6 +118,7 @@ class GcodeConverter:
         if hierarchy is None:
             return contours
         
+        
         hierarchy = hierarchy[0]
         keep_indices = []
         
@@ -136,6 +137,28 @@ class GcodeConverter:
             # bbox-based duplicate check
             if not self.is_bbox_duplicate(parent_contour, child_contour):
                 keep_indices.append(i)
+        
+        return [contours[i] for i in keep_indices]
+
+
+    def remove_contour_duplicates(self, contours):
+        processed = set()
+        keep_indices = []
+    
+        for i in range(len(contours)):
+            if i in processed:
+                continue
+                
+            keep_indices.append(i)
+            current_contour = contours[i]
+            
+            # Compare with all other contours   
+            for j in range(i + 1, len(contours)):
+                if j in processed:
+                    continue
+                    
+                if self.is_bbox_duplicate(current_contour, contours[j]):
+                    processed.add(j)
         
         return [contours[i] for i in keep_indices]
 
@@ -176,7 +199,7 @@ class GcodeConverter:
             
             distance = np.sqrt(np.sum((current_point - last_kept_point) ** 2))
             
-            if distance >= min_distance or (i == len(points) - 1):
+            if distance >= min_distance:
                 filtered_points.append(current_point)
             # else: skip this point (too close)
 
@@ -195,7 +218,7 @@ class GcodeConverter:
         contours = [c for c in contours if len(c) > 3] 
 
         # remove inner regions that are almost identical to the parent in the hierarchy
-        contours = self.remove_duplicates(contours, hierarchy)
+        contours = self.remove_contour_duplicates(contours)
 
         # sort the contours from left to right, top to bottom
         contours, _ = self.sort_contours(contours)
