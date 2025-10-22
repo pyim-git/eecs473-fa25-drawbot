@@ -6,7 +6,7 @@ import numpy as np
 import pdb
 import math
 from visual import *
-from skimage.morphology import medial_axis, skeletonize
+#from skimage.morphology import medial_axis, skeletonize
 import pytesseract    # for text identification (to be implemented)
 from scipy.spatial import distance
 
@@ -15,7 +15,7 @@ from scipy.spatial import distance
 # Setup directories
 input_folder = "../data"
 output_folder = "../output"
-src_file = "pi.png"
+src_file = "num.png"
 gcode_file = src_file.rsplit('.', 1)[0] + ".gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
@@ -23,7 +23,7 @@ gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
-# user-configurable drawing dimension in pixels
+# user-configurable drawing dimension in pixels 
 INPUT_WIDTH = 1500
 INPUT_HEIGHT = 1500
 
@@ -48,26 +48,29 @@ class GcodeConverter:
 
         # TO_DO: use a mask for processing 3 different color threshold 
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        blurred = cv2.GaussianBlur(gray, (5,5), 0)
 
+        #determine which filter to use based on image quality, Guassian for poorer quality
+        #blurred = cv2.GaussianBlur(gray, (5,5), 0)
+        blurred = cv2.bilateralFilter(gray, 9, 75, 75)
+
+        # Preferably use threshold. adaptiveThreshold is for photos with poor lighting
         #_, binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2 )
-        _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+        _, binary = cv2.threshold(blurred, 150, 255, cv2.THRESH_BINARY_INV)
  
 
         # Connect small gaps to get smoother shapes
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-        # Skeletonize to get center lines (thinning bold lines to get single line apth)
-        binary_bool = cleaned > 0
-        skeleton, _ = medial_axis(binary_bool, return_distance=True)
-        skeleton = (skeleton * 255).astype(np.uint8)
+        # better thinning function! (smoother, but remove details)
+        skeleton = cv2.ximgproc.thinning(cleaned.astype(np.uint8), thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
 
         return img, skeleton
 
 
-    """sort contours from top to bottom, left to right"""
     def sort_contours(self, contours, row_height_threshold=50):
+        """sort contours from top to bottom, left to right"""
+
         # Get the height and width for each contour 
         bounding_boxes = [cv2.boundingRect(cnt) for cnt in contours]
         
@@ -109,8 +112,9 @@ class GcodeConverter:
 
  
 
-    """Removes obvious parent-child duplicates"""
     def remove_duplicates(self, contours, hierarchy):
+        """Removes obvious parent-child duplicates"""
+
         if hierarchy is None:
             return contours
         
@@ -136,8 +140,9 @@ class GcodeConverter:
         return [contours[i] for i in keep_indices]
 
 
-    """Check for parent/child duplicates in the hierarchy by comparing their bounding-box"""
     def is_bbox_duplicate(self, parent, child):
+        """Check for parent/child duplicates in the hierarchy by comparing their bounding-box"""
+
         px, py, pw, ph = cv2.boundingRect(parent)
         cx, cy, cw, ch = cv2.boundingRect(child)
         
@@ -156,8 +161,10 @@ class GcodeConverter:
         return overlap_ratio > 0.8 and size_ratio > 0.6
 
 
-    """Remove close points after approxPolyDP"""
-    def remove_close_points(self, points, min_distance=5.0): # adjustable min_distance threshold
+    # adjustable min_distance threshold
+    def remove_close_points(self, points, min_distance=2.0): 
+        """Remove close points after approxPolyDP"""
+
         if len(points) < 3:
             return points
         
@@ -177,8 +184,8 @@ class GcodeConverter:
 
 
 
-    """Write gcode to output file"""
     def image_to_gcode(self, image_path, output_file, threshold_Closed = 0.3, precision=0.007):
+        """Write gcode to output file"""
         _, binary_img = self.preprocess(image_path)
 
         # Find contours using RETR_TREE (detects nested contours)
