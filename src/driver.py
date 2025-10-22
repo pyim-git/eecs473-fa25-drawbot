@@ -15,7 +15,7 @@ from scipy.spatial import distance
 # Setup directories
 input_folder = "../data"
 output_folder = "../output"
-src_file = "num.png"
+src_file = "gray_colored.png"
 gcode_file = src_file.rsplit('.', 1)[0] + ".gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
