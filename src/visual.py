@@ -5,10 +5,10 @@ import re
 
 def extract_points(gcode_file_path):
     """
-    Extract only X,Y coordinates from G1 commands in G-code file
+    Extract all X,Y coordinates in G-code file
     
     Returns:
-        list: List of (x, y) tuples from G1 commands
+        list: List of (x, y) tuples from G1/G0 commands
     """
     all_points = []
     g0_points = []
@@ -29,8 +29,8 @@ def extract_points(gcode_file_path):
                 y_match = re.search(r'Y([-\d.]+)', line)
                 
                 if x_match and y_match:
-                    x = float(x_match.group(1))
-                    y = float(y_match.group(1))
+                    x = int(x_match.group(1))
+                    y = int(y_match.group(1))
                     all_points.append((x, y))
                 else:
                     print(f"Warning: G1 command without X,Y coordinates on line {line_num}: {line}")
@@ -42,8 +42,8 @@ def extract_points(gcode_file_path):
                 y_match = re.search(r'Y([-\d.]+)', line)
                 
                 if x_match and y_match:
-                    x = float(x_match.group(1))
-                    y = float(y_match.group(1))
+                    x = int(x_match.group(1))
+                    y = int(y_match.group(1))
                     g0_points.append((x, y))
                 else:
                     print(f"Warning: G0 command without X,Y coordinates on line {line_num}: {line}")
@@ -52,7 +52,7 @@ def extract_points(gcode_file_path):
 
 
 """Visualize g-code"""
-def visualize_g1_coordinates(gcode_file_path, output_file):
+def visualize_gcode(gcode_file_path, output_file):
 
     # Extract all points
     all_points, g0_points = extract_points(gcode_file_path)
@@ -91,8 +91,8 @@ def visualize_g1_coordinates(gcode_file_path, output_file):
                 y_match = re.search(r'Y([-\d.]+)', line)
                 
                 if x_match and y_match:
-                    x = float(x_match.group(1))
-                    y = float(y_match.group(1))
+                    x = int(x_match.group(1))
+                    y = int(y_match.group(1))
                     points.append((x, y))
                 else:
                     print(f"Warning: G1 command without X,Y coordinates on line {line_num}: {line}")
@@ -136,10 +136,10 @@ def visualize_g1_coordinates(gcode_file_path, output_file):
     
     # Print detailed information
     print(f"Found {len(all_points)} coordinates")
-    print(f"X range: {min(x_vals):.2f} to {max(x_vals):.2f}")
-    print(f"Y range: {min(y_vals):.2f} to {max(y_vals):.2f}")
-    print(f"First point: X{x_vals[0]:.2f} Y{y_vals[0]:.2f}")
-    print(f"Last point: X{x_vals[-1]:.2f} Y{y_vals[-1]:.2f}")
+    print(f"X range: {min(x_vals)} to {max(x_vals)}")
+    print(f"Y range: {min(y_vals)} to {max(y_vals)}")
+    print(f"First point: X{x_vals[0]} Y{y_vals[0]}")
+    print(f"Last point: X{x_vals[-1]} Y{y_vals[-1]}")
     
     return all_points
 
