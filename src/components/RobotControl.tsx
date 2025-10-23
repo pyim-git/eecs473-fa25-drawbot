@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -17,8 +17,11 @@ import {
   Settings,
   AlertTriangle,
   CheckCircle,
-  Zap
+  Zap,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
+import { toast } from 'sonner@2.0.3';
 
 interface RobotStatus {
   isConnected: boolean;
@@ -40,10 +43,16 @@ export function RobotControl() {
   });
 
   const [isConnecting, setIsConnecting] = useState(false);
-  const [availableRobots, setAvailableRobots] = useState([
-    { id: 'db-001', name: 'DrawBot-001', signal: 85 },
-    { id: 'db-002', name: 'DrawBot-002', signal: 92 },
-  ]);
+  const wsRef = useRef<WebSocket | null>(null);
+
+  // Cleanup WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, []);
 
   // Simulate robot status updates
   useEffect(() => {
@@ -66,25 +75,69 @@ export function RobotControl() {
     }
   }, [robotStatus.isConnected, robotStatus.isDrawing]);
 
-  const handleConnect = async (robotId: string) => {
+  const handleConnect = async () => {
     setIsConnecting(true);
     
-    // Simulate connection process
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setRobotStatus({
-      isConnected: true,
-      batteryLevel: 85,
-      isDrawing: false,
-      currentTask: null,
-      position: { x: 0, y: 0 },
-      drawingProgress: 0
-    });
-    
-    setIsConnecting(false);
+    try {
+      // Create WebSocket connection to the robot
+      const ws = new WebSocket('ws://172.20.10.10/ws');
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        toast.success('Connected to robot');
+        
+        // Send "START_CONNECTION" message when connected
+        ws.send('START_CONNECTION');
+        
+        setRobotStatus({
+          isConnected: true,
+          batteryLevel: 85,
+          isDrawing: false,
+          currentTask: null,
+          position: { x: 0, y: 0 },
+          drawingProgress: 0
+        });
+        
+        setIsConnecting(false);
+      };
+
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        toast.error('Failed to connect to robot');
+        setIsConnecting(false);
+      };
+
+      ws.onclose = () => {
+        console.log('WebSocket disconnected');
+        toast.info('Disconnected from robot');
+        setRobotStatus(prev => ({
+          ...prev,
+          isConnected: false,
+          isDrawing: false,
+          currentTask: null,
+          drawingProgress: 0
+        }));
+      };
+
+      ws.onmessage = (event) => {
+        console.log('Message from robot:', event.data);
+        // Handle messages from the robot here
+        toast.info(`Robot: ${event.data}`);
+      };
+
+    } catch (error) {
+      console.error('Connection error:', error);
+      toast.error('Failed to connect to robot');
+      setIsConnecting(false);
+    }
   };
 
   const handleDisconnect = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
     setRobotStatus(prev => ({
       ...prev,
       isConnected: false,
@@ -135,6 +188,28 @@ export function RobotControl() {
     }, 2000);
   };
 
+  const sendCommand = (command: string) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(command);
+      console.log('Sent command:', command);
+      toast.success(`Command sent: ${command}`);
+    } else {
+      toast.error('Robot not connected');
+    }
+  };
+
+  const handleForward = () => {
+    sendCommand('FORWARD');
+  };
+
+  const handleBackward = () => {
+    sendCommand('BACKWARD');
+  };
+
+  const handleStop = () => {
+    sendCommand('STOP');
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -162,25 +237,15 @@ export function RobotControl() {
                 </div>
                 
                 <div className="space-y-2">
-                  <h4 className="font-medium">Available Robots</h4>
-                  {availableRobots.map((robot) => (
-                    <div key={robot.id} className="flex items-center justify-between p-3 border rounded-lg">
-                      <div>
-                        <p className="font-medium">{robot.name}</p>
-                        <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                          <Wifi className="h-3 w-3" />
-                          <span>{robot.signal}%</span>
-                        </div>
-                      </div>
-                      <Button
-                        size="sm"
-                        onClick={() => handleConnect(robot.id)}
-                        disabled={isConnecting}
-                      >
-                        {isConnecting ? 'Connecting...' : 'Connect'}
-                      </Button>
-                    </div>
-                  ))}
+                  <h4 className="font-medium">Robot Connection</h4>
+                  <p className="text-sm text-muted-foreground">IP: 172.20.10.10</p>
+                  <Button
+                    className="w-full"
+                    onClick={handleConnect}
+                    disabled={isConnecting}
+                  >
+                    {isConnecting ? 'Connecting...' : 'Connect'}
+                  </Button>
                 </div>
               </div>
             ) : (
@@ -277,77 +342,41 @@ export function RobotControl() {
 
                 <Separator />
 
-                {/* Drawing Controls */}
+                {/* Movement Controls */}
                 <div className="space-y-4">
-                  <h4 className="font-medium">Drawing Controls</h4>
+                  <h4 className="font-medium">Movement Controls</h4>
                   
-                  {robotStatus.isDrawing && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span>Progress</span>
-                        <span>{robotStatus.drawingProgress.toFixed(0)}%</span>
-                      </div>
-                      <Progress value={robotStatus.drawingProgress} />
+                  <div className="flex flex-col items-center gap-4">
+                    <Button 
+                      onClick={handleForward} 
+                      className="w-32 flex items-center justify-center gap-2"
+                      size="lg"
+                    >
+                      <ArrowUp className="h-5 w-5" />
+                      Forward
+                    </Button>
+                    
+                    <div className="flex gap-4">
+                      <Button 
+                        onClick={handleBackward} 
+                        className="w-32 flex items-center justify-center gap-2"
+                        size="lg"
+                      >
+                        <ArrowDown className="h-5 w-5" />
+                        Backward
+                      </Button>
+                      
+                      <Button 
+                        onClick={handleStop} 
+                        variant="destructive"
+                        className="w-32 flex items-center justify-center gap-2"
+                        size="lg"
+                      >
+                        <Square className="h-5 w-5" />
+                        Stop
+                      </Button>
                     </div>
-                  )}
-                  
-                  <div className="flex gap-2">
-                    {!robotStatus.isDrawing ? (
-                      <Button onClick={handleStartDrawing} className="flex items-center gap-2">
-                        <Play className="h-4 w-4" />
-                        Start Drawing
-                      </Button>
-                    ) : (
-                      <Button onClick={handlePauseDrawing} variant="outline" className="flex items-center gap-2">
-                        <Pause className="h-4 w-4" />
-                        Pause
-                      </Button>
-                    )}
-                    
-                    <Button
-                      onClick={handleStopDrawing}
-                      variant="outline"
-                      disabled={!robotStatus.isDrawing && robotStatus.drawingProgress === 0}
-                      className="flex items-center gap-2"
-                    >
-                      <Square className="h-4 w-4" />
-                      Stop
-                    </Button>
-                    
-                    <Button
-                      onClick={handleHomePosition}
-                      variant="outline"
-                      disabled={robotStatus.isDrawing}
-                      className="flex items-center gap-2"
-                    >
-                      <RotateCcw className="h-4 w-4" />
-                      Home
-                    </Button>
                   </div>
-                </div>
-
-                <Separator />
-
-                {/* Quick Actions */}
-                <div className="space-y-4">
-                  <h4 className="font-medium">Quick Actions</h4>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button variant="outline" size="sm" disabled>
-                      Load Snapshot
-                    </Button>
-                    <Button variant="outline" size="sm" disabled>
-                      Custom Path
-                    </Button>
-                    <Button variant="outline" size="sm" disabled>
-                      Calibrate
-                    </Button>
-                    <Button variant="outline" size="sm" disabled>
-                      Test Pattern
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Advanced features coming soon
-                  </p>
                 </div>
               </>
             )}
