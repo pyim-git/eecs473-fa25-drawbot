@@ -9,7 +9,7 @@ hsv_weights = {
     'red':  (0.8, 0.15, 0.05),
     'blue': (0.7, 0.2, 0.1),
     'green': (0.6, 0.3, 0.1),
-    'purple': (0.6, 0.35, 0.05)
+    'purple': (0.6, 0.35, 0.05),
 }
 
 # HSV ranges for each color
@@ -23,8 +23,12 @@ hsv_ranges = {
         'upper': (180, 50, 200)
     },
     'red':{
-        'lower1': (0, 80, 80), 'upper1': (10, 255, 255),
-        'lower2': (160, 80, 80), 'upper2': (180, 255, 255)   
+        'lower1': (0, 90, 90), 'upper1': (10, 255, 255),
+        'lower2': (160, 90, 90), 'upper2': (180, 255, 255)   
+    },
+    'orange': {
+        'lower': (10, 80, 80),
+        'upper': (30,255,255)
     },
     'blue': {
         'lower': (95,50,30),
@@ -37,6 +41,10 @@ hsv_ranges = {
     'purple': {
         'lower': (120, 50, 30),
         'upper': (155, 255, 255)
+    },
+    'brown': {
+        'lower': (10, 100, 20),
+        'upper': (30,255,200)
     }
 }
 
@@ -48,6 +56,8 @@ drawing_colors = [
     'red',
     'green',
     'purple',
+    'orange',
+    'brown'
 ]
 
 # user configurable default color for undetected colors
@@ -91,15 +101,14 @@ def getColorMasks(image):
 
 
 
-
 def assignColors(org_img, contours):
     """Loop through contours and assign colors"""
-    color_masks, _,  _= getColorMasks(org_img)
+    color_masks, _= getColorMasks(org_img)
     contour_colors = []
 
     for i, contour in enumerate(contours):
         color = detectColor(org_img, contour, color_masks)
-        if color is 'unknown':
+        if color == 'unknown':
             color = DEFAULT_COLOR
         contour_colors.append({ 
             'color': color,
@@ -109,7 +118,7 @@ def assignColors(org_img, contours):
     return contour_colors
 
 
-def detectColor(image, contour, color_masks, stroke_width =20): 
+def detectColor(image, contour, color_masks, stroke_width =30): 
     """adjustable stroke width for better sampling"""
 
     # Find best color match by overlaping contour mask with color mask

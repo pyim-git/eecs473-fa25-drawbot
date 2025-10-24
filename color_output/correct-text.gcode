@@ -997,7 +997,7 @@ G1 X1378 Y1218
 M5
 
 Contour 57
-Color black
+Color orange
 G0 X143 Y1381
 M3
 G1 X137 Y1399
@@ -1017,7 +1017,7 @@ G1 X143 Y1381
 M5
 
 Contour 58
-Color black
+Color orange
 G0 X291 Y1371
 M3
 G1 X290 Y1429
@@ -1042,7 +1042,7 @@ G1 X291 Y1371
 M5
 
 Contour 59
-Color black
+Color orange
 G0 X290 Y1401
 M3
 G1 X290 Y1375
@@ -1060,7 +1060,7 @@ G1 X290 Y1401
 M5
 
 Contour 60
-Color black
+Color orange
 G0 X459 Y1375
 M3
 G1 X472 Y1371
@@ -1079,7 +1079,7 @@ G1 X459 Y1375
 M5
 
 Contour 61
-Color black
+Color orange
 G0 X652 Y1372
 M3
 G1 X649 Y1427
@@ -1095,7 +1095,7 @@ G1 X652 Y1372
 M5
 
 Contour 62
-Color black
+Color orange
 G0 X710 Y1382
 M3
 G1 X706 Y1413
@@ -1122,7 +1122,7 @@ G1 X710 Y1382
 M5
 
 Contour 63
-Color black
+Color orange
 G0 X857 Y1371
 M3
 G1 X861 Y1435

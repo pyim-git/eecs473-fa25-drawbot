@@ -735,7 +735,7 @@ G1 X928 Y794
 M5
 
 Contour 43
-Color red
+Color orange
 G0 X1406 Y795
 M3
 G1 X1389 Y801
@@ -864,7 +864,7 @@ G1 X951 Y861
 M5
 
 Contour 49
-Color red
+Color orange
 G0 X1094 Y857
 M3
 G1 X1084 Y868
@@ -882,7 +882,7 @@ G1 X1094 Y857
 M5
 
 Contour 50
-Color red
+Color orange
 G0 X1187 Y856
 M3
 G1 X1176 Y932
@@ -907,7 +907,7 @@ G1 X1187 Y856
 M5
 
 Contour 51
-Color red
+Color orange
 G0 X1146 Y861
 M3
 G1 X1152 Y866
@@ -924,7 +924,7 @@ G1 X1146 Y861
 M5
 
 Contour 52
-Color red
+Color orange
 G0 X1186 Y869
 M3
 G1 X1191 Y872
@@ -941,7 +941,7 @@ G1 X1186 Y869
 M5
 
 Contour 53
-Color red
+Color orange
 G0 X1251 Y846
 M3
 G1 X1257 Y910
@@ -962,7 +962,7 @@ G1 X1251 Y846
 M5
 
 Contour 54
-Color red
+Color orange
 G0 X1289 Y850
 M3
 G1 X1279 Y863
@@ -989,7 +989,7 @@ G1 X1289 Y850
 M5
 
 Contour 55
-Color red
+Color orange
 G0 X1327 Y849
 M3
 G1 X1323 Y862
@@ -1327,7 +1327,7 @@ G1 X952 Y1052
 M5
 
 Contour 72
-Color red
+Color orange
 G0 X1126 Y1037
 M3
 G1 X1120 Y1054
@@ -1346,7 +1346,7 @@ G1 X1126 Y1037
 M5
 
 Contour 73
-Color red
+Color orange
 G0 X1208 Y1041
 M3
 G1 X1208 Y1050
@@ -1370,7 +1370,7 @@ G1 X1208 Y1041
 M5
 
 Contour 74
-Color red
+Color orange
 G0 X1174 Y1043
 M3
 G1 X1177 Y1045
@@ -1389,7 +1389,7 @@ G1 X1174 Y1043
 M5
 
 Contour 75
-Color red
+Color orange
 G0 X1208 Y1051
 M3
 G1 X1210 Y1052
@@ -1408,7 +1408,7 @@ G1 X1208 Y1051
 M5
 
 Contour 76
-Color red
+Color orange
 G0 X1262 Y1035
 M3
 G1 X1269 Y1062
@@ -1429,7 +1429,7 @@ G1 X1262 Y1035
 M5
 
 Contour 77
-Color red
+Color orange
 G0 X1291 Y1037
 M3
 G1 X1299 Y1042
@@ -1457,7 +1457,7 @@ G1 X1291 Y1037
 M5
 
 Contour 78
-Color red
+Color orange
 G0 X1322 Y1032
 M3
 G1 X1319 Y1051
@@ -1523,7 +1523,7 @@ G1 X475 Y1184
 M5
 
 Contour 81
-Color green
+Color orange
 G0 X1205 Y1148
 M3
 G1 X1210 Y1180
@@ -1733,7 +1733,7 @@ G1 X878 Y1245
 M5
 
 Contour 91
-Color red
+Color orange
 G0 X1271 Y1199
 M3
 G1 X1265 Y1202
