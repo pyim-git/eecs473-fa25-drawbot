@@ -6,16 +6,16 @@ import numpy as np
 import pdb
 import math
 from visual import *
-#from skimage.morphology import medial_axis, skeletonize
+from color import *
 import pytesseract    # for text identification (to be implemented)
 from scipy.spatial import distance
 
 
 
 # Setup directories
-input_folder = "../data"
-output_folder = "../output"
-src_file = "text.png"
+input_folder = "../color_img"
+output_folder = "../color_output"
+src_file = "test.png"
 gcode_file = src_file.rsplit('.', 1)[0] + ".gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
@@ -27,7 +27,9 @@ if not os.path.exists(output_folder):
 INPUT_WIDTH = 1500
 INPUT_HEIGHT = 1500
 
- 
+
+
+
 
 class GcodeConverter:
     def __init__(self):
@@ -37,17 +39,16 @@ class GcodeConverter:
         self.TRACE = "G1"    # robot tracing a path to next point (slower speed)
    
     
-    def preprocess(self, image):
-        img = cv2.imread(image)
-        if img is None:
-            raise ValueError(f"Could not load image from {image}")
-    
-        # Resize image
-        img = cv2.resize(img, (INPUT_WIDTH, INPUT_HEIGHT))
-    
+    def preprocess(self, image_path):
+        """resize, clean, and skeletonize the image"""
+        org_img = cv2.imread(image_path)
+        if org_img is None:
+            raise ValueError(f"Could not load image from {image_path}")
 
-        # TO_DO: use a mask for processing 3 different color threshold 
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        org_img = cv2.resize(org_img, (INPUT_WIDTH, INPUT_HEIGHT))
+
+        # convert image to gray scale 
+        gray = cv2.cvtColor(org_img, cv2.COLOR_BGR2GRAY)
 
         # determine which filter to use based on image quality, Guassian for poorer quality. filter can make image worse
         #blurred = cv2.GaussianBlur(gray, (5,5), 0)
@@ -55,17 +56,19 @@ class GcodeConverter:
 
         # Preferably use threshold. adaptiveThreshold is for photos with poor lighting
         #_, binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2 )
-        _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
- 
+        _, binary = cv2.threshold(gray, 210, 255, cv2.THRESH_BINARY_INV)
 
-        # Connect small gaps to get smoother shapes
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
+        # # Connect small gaps to get smoother shapes
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close, iterations=1)
+
+        # for clustered text, separate them using this function
+        # kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        # cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel_open, iterations=1)
 
         # smooth thinning but removes minor details
         skeleton = cv2.ximgproc.thinning(cleaned.astype(np.uint8), thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
-
-        return img, skeleton
+        return skeleton, org_img
 
 
     def sort_contours(self, contours, row_height_threshold=50):
@@ -111,36 +114,6 @@ class GcodeConverter:
 
 
  
-
-    def remove_duplicates(self, contours, hierarchy):
-        """Removes obvious parent-child duplicates"""
-
-        if hierarchy is None:
-            return contours
-        
-        
-        hierarchy = hierarchy[0]
-        keep_indices = []
-        
-        for i in range(len(contours)):
-            parent_idx = hierarchy[i][3]
-            
-            # Keep all parent contours
-            if parent_idx == -1:
-                keep_indices.append(i)
-                continue
-            
-            # For child contours, check if they're duplicates
-            parent_contour = contours[parent_idx]
-            child_contour = contours[i]
-            
-            # bbox-based duplicate check
-            if not self.is_bbox_duplicate(parent_contour, child_contour):
-                keep_indices.append(i)
-        
-        return [contours[i] for i in keep_indices]
-
-
     def remove_contour_duplicates(self, contours):
         processed = set()
         keep_indices = []
@@ -163,23 +136,24 @@ class GcodeConverter:
         return [contours[i] for i in keep_indices]
 
 
-    def is_bbox_duplicate(self, parent, child):
-        """Check for parent/child duplicates in the hierarchy by comparing their bounding-box"""
 
-        px, py, pw, ph = cv2.boundingRect(parent)
-        cx, cy, cw, ch = cv2.boundingRect(child)
+    def is_bbox_duplicate(self, contourA, contourB):
+        """Check for contour duplicates by comparing their bounding boxes"""
+
+        px, py, pw, ph = cv2.boundingRect(contourA)
+        cx, cy, cw, ch = cv2.boundingRect(contourB)
         
         # Calculate overlap and size ratios
-        overlap_x = max(0, min(px + pw, cx + cw) - max(px, cx))
-        overlap_y = max(0, min(py + ph, cy + ch) - max(py, cy))
-        overlap_area = overlap_x * overlap_y
+        overlap_A = max(0, min(px + pw, cx + cw) - max(px, cx))
+        overlap_B = max(0, min(py + ph, cy + ch) - max(py, cy))
+        overlap_area = overlap_A * overlap_B
         
-        parent_area = pw * ph
-        child_area = cw * ch
+        areaA= pw * ph
+        areaB = cw * ch
         
         # If child mostly overlaps parent and has similar size, it's a duplicate
-        overlap_ratio = overlap_area / child_area if child_area > 0 else 0
-        size_ratio = child_area / parent_area if parent_area > 0 else 0
+        overlap_ratio = overlap_area / areaB if areaB > 0 else 0
+        size_ratio = areaB / areaA if areaA > 0 else 0
         
         return overlap_ratio > 0.8 and size_ratio > 0.6
 
@@ -206,31 +180,40 @@ class GcodeConverter:
         return np.array(filtered_points)
 
 
+     
 
     def image_to_gcode(self, image_path, output_file, threshold_Closed = 0.3, precision=0.007):
-        """Write gcode to output file"""
-        _, binary_img = self.preprocess(image_path)
+        """wwrite gcode to output file"""
+
+        # process the image to get clean contours
+        processed_img, org_img = self.preprocess(image_path)
 
         # Find contours using RETR_TREE (detects nested contours)
-        contours, hierarchy = cv2.findContours(binary_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+        contours, _ = cv2.findContours(processed_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
 
-         # filter out small contours
+        # filter out small contours
         contours = [c for c in contours if len(c) > 3] 
 
         # remove inner regions that are almost identical to the parent in the hierarchy
         contours = self.remove_contour_duplicates(contours)
 
         # sort the contours from left to right, top to bottom
-        contours, _ = self.sort_contours(contours)
+        contours, b_boxes = self.sort_contours(contours)
 
-      
+        # assign colors to all contours
+        color_contours = assignColors(org_img, contours)
+
+
         # Open file for writing
         with open(output_file, 'w') as f:
             f.write("G90\n")  # Move to origin (0,0) at top left corner 
 
-            print(f"Found {len(contours)} contours")
+            print(f"Found {len(color_contours)} contours")
 
-            for i, contour in enumerate(contours):
+            for i, item in enumerate(color_contours):
+                color = item['color']
+                contour = item['contour']
+
                 # check if the contour is closed or open path. 
                 points = contour.reshape(-1, 2) 
                 start = points[0]
@@ -251,13 +234,15 @@ class GcodeConverter:
                 simplified = cv2.approxPolyDP(contour, epsilon, True)
                 points = simplified.reshape(-1, 2)
 
-                if len(points) < 2:
+                if len(points) < 2: # ignore single pixels
                     continue 
 
-                points = self.remove_close_points(points)   # remove close points after simplification
+                # remove close points after simplification
+                points = self.remove_close_points(points)   
 
                 f.write(f"Contour {i+1}\n")
-                
+                f.write(f"Color {color}\n")
+
                 # Move to first point (marker up)
                 f.write(f"G0 X{points[0][0]} Y{points[0][1]}\n")
                 

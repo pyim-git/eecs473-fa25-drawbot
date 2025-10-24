@@ -1,6 +1,17 @@
 import matplotlib.pyplot as plt
 import re
 
+# Matplot available colors
+color_map = {
+    'blue' : 'b',
+    'green': 'g',
+    'red' : 'r',
+    'cyan' : 'c',
+    'yellow' : 'y',
+    'black' : 'k',
+    'white' : 'w',
+    'purple': 'm'
+}
 
 
 def extract_points(gcode_file_path):
@@ -75,15 +86,21 @@ def visualize_gcode(gcode_file_path, output_file):
     with open(gcode_file_path, 'r') as f:
         current_line = 1
         points = []
+        color = 'b'
 
         for line_num, line in enumerate(f, 1):
             line = line.strip()
             
             contour_match = re.search('Contour\s+(\d+)', line)
+            color_match = re.search('Color\s+(.+)', line)
             contour_num = 0
             if contour_match: 
                 contour_num = int(contour_match.group(1))
                 print(f"Contour number: {contour_num}")
+
+            if color_match:
+                color = color_map[color_match.group(1)]
+                print(f"Color {color}")
             
             if line.startswith('G1') or line.startswith('G0'):                    
                 # Extract X and Y coordinates using regex
@@ -102,7 +119,8 @@ def visualize_gcode(gcode_file_path, output_file):
                 x_vals = [p[0] for p in points]
                 y_vals = [p[1] for p in points]
 
-                plt.plot(x_vals, y_vals, 'b-', linewidth=2, alpha=0.7)
+                plt.plot(x_vals, y_vals, f"{color}-", linewidth=2, alpha=0.7)
+
                 #plt.plot(x_vals, y_vals, 'ro', markersize=4, alpha=0.7)
                 current_line += 1
                 points.clear()
@@ -110,16 +128,16 @@ def visualize_gcode(gcode_file_path, output_file):
     
 
     # # Plot G0 points (the starting point for each contour)
-    #plt.plot(x_g0, y_g0, 'k^', markersize = 8, alpha = 0.7, label = 'Start Point of Contour (in order)')
+   # plt.plot(x_g0, y_g0, 'k^', markersize = 8, alpha = 0.7, label = 'Start Point of Contour (in order)')
     
     # Mark first and last point of robot path
     plt.plot(x_all[0], y_all[0], 'go', markersize=10, markeredgecolor='black', label='Start')
     plt.plot(x_all[-1], y_all[-1], 'gs', markersize=10, markeredgecolor='black', label='End')
     
     # Add point labels for all g0 points
-    #for i, (x, y) in enumerate(g0_points):  
-       # plt.annotate(f'P{i+1}', (x, y), xytext=(5, 5), textcoords='offset points', 
-                   # fontsize=8, alpha=0.7)
+    # for i, (x, y) in enumerate(g0_points):  
+    #     plt.annotate(f'P{i+1}', (x, y), xytext=(5, 5), textcoords='offset points', 
+    #                 fontsize=8, alpha=0.7)
     
     plt.gca().invert_yaxis() # flip the y axis
     plt.xlabel('X Coordinate')
