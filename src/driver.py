@@ -15,7 +15,7 @@ from scipy.spatial import distance
 # Setup directories
 input_folder = "../color_img"
 output_folder = "../color_output"
-src_file = "test.png"
+src_file = "mytest.png"
 gcode_file = src_file.rsplit('.', 1)[0] + ".gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
@@ -56,7 +56,7 @@ class GcodeConverter:
 
         # Preferably use threshold. adaptiveThreshold is for photos with poor lighting
         #_, binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2 )
-        _, binary = cv2.threshold(gray, 210, 255, cv2.THRESH_BINARY_INV)
+        _, binary = cv2.threshold(gray, 170, 255, cv2.THRESH_BINARY_INV)
 
         # # Connect small gaps to get smoother shapes
         kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
@@ -178,11 +178,41 @@ class GcodeConverter:
             # else: skip this point (too close)
 
         return np.array(filtered_points)
+    
 
+    def simplify_points(self, contour, threshold_Closed = 0.3, precision=0.007 ):
+        # check if the contour is closed or open path. 
+        points = contour.reshape(-1, 2) 
+        start = points[0]
+        end = points[-1]
+        distance = np.linalg.norm(start - end)
+
+        # if distance between start and end is close, close the path
+        x, y, w, h = cv2.boundingRect(contour)
+        contour_size = np.linalg.norm([w, h])
+        threshold = contour_size * threshold_Closed
+        isClosed = False
+        if distance < threshold:  
+            isClosed = True
+            
+        # simplify the points in the contour 
+        perimeter = cv2.arcLength(contour, True)
+        epsilon = precision * perimeter         # (adjustable for shape precision)
+        simplified = cv2.approxPolyDP(contour, epsilon, True)
+        points = simplified.reshape(-1, 2)
+                
+        # remove close points after simplification
+        points = self.remove_close_points(points)   
+       # points = 5*points  # scale to drawing dimensions mm?
+
+        if isClosed: # connect end to start if closed path
+            points = np.vstack([points, points[0]])
+
+        return points
 
      
 
-    def image_to_gcode(self, image_path, output_file, threshold_Closed = 0.3, precision=0.007):
+    def image_to_gcode(self, image_path, output_file):
         """wwrite gcode to output file"""
 
         # process the image to get clean contours
@@ -197,12 +227,15 @@ class GcodeConverter:
         # remove inner regions that are almost identical to the parent in the hierarchy
         contours = self.remove_contour_duplicates(contours)
 
+
         # sort the contours from left to right, top to bottom
         contours, b_boxes = self.sort_contours(contours)
 
         # assign colors to all contours
         color_contours = assignColors(org_img, contours)
 
+        # simplify the contours by pruning away points
+        #for contour in enumerate(color_contours)
 
         # Open file for writing
         with open(output_file, 'w') as f:
@@ -214,48 +247,37 @@ class GcodeConverter:
                 color = item['color']
                 contour = item['contour']
 
-                # check if the contour is closed or open path. 
-                points = contour.reshape(-1, 2) 
-                start = points[0]
-                end = points[-1]
-                distance = np.linalg.norm(start - end)
+                # simplify points in the contour
+                points = self.simplify_points(contour).astype(np.float32)
 
-                # if distance between start and end is close, close the path
-                x, y, w, h = cv2.boundingRect(contour)
-                contour_size = np.linalg.norm([w, h])
-                threshold = contour_size * threshold_Closed
-                isClosed = False
-                if distance < threshold:  
-                    isClosed = True     
-            
-                # simplify the points in the contour 
-                perimeter = cv2.arcLength(contour, True)
-                epsilon = precision * perimeter         # (adjustable for shape precision)
-                simplified = cv2.approxPolyDP(contour, epsilon, True)
-                points = simplified.reshape(-1, 2)
+                # split a contour into horizontal sections
+                contour = np.array(points, dtype=np.float32).reshape((-1, 1, 2))
+                x,y,w,h = cv2.boundingRect(contour)
+                points_list = splitContoursHorizontally(points, y, y+h)
 
-                if len(points) < 2: # ignore single pixels
-                    continue 
+    
+                for points in points_list:
+                    if len(points) ==0:
+                        print("empty points")
+                        continue
+                    
+                        
+                    f.write(f"Contour {i+1}\n")
+                    f.write(f"Color {color}\n")
 
-                # remove close points after simplification
-                points = self.remove_close_points(points)   
+                    # Move to first point (marker up)
+                    f.write(f"G0 X{points[0][0]:.5f} Y{points[0][1]:.5f}\n")
+                    
+                    # Marker down, draw the contour
+                    f.write(f"{self.M_DOWN}\n")
+                    for point in points[1:]:
+                        f.write(f"G1 X{point[0]:.5f} Y{point[1]:.5f}\n")
 
-                f.write(f"Contour {i+1}\n")
-                f.write(f"Color {color}\n")
-
-                # Move to first point (marker up)
-                f.write(f"G0 X{points[0][0]} Y{points[0][1]}\n")
+                    # if isClosed:      # connect end to start if closed path
+                    #     f.write(f"G1 X{points[0][0]} Y{points[0][1]}\n")
                 
-                # Marker down, draw the contour
-                f.write(f"{self.M_DOWN}\n")
-                for point in points[1:]:
-                    f.write(f"G1 X{point[0]} Y{point[1]}\n")
-
-                if isClosed:      # connect end to start if closed path
-                    f.write(f"G1 X{points[0][0]} Y{points[0][1]}\n")
-
-                f.write(f"{self.M_UP}\n")
-                f.write("\n")
+                    f.write(f"{self.M_UP}\n")
+                    f.write("\n")
 
             f.write("M30\n")      # end of drawing, program completes
 
@@ -272,7 +294,7 @@ def main():
         image_path = f"{input_folder}/{src_file}" 
         output_file = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file}")
         print(f"G-code saved to: {output_file}")
-        visualize_gcode(output_file, gcode_plotfile)
+        visualize_gcode(output_file, f"{output_folder}", gcode_plotfile)
 
     except Exception as e:
         print(f"Error with custom image: {e}")

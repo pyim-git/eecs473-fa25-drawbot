@@ -6,8 +6,8 @@ color_map = {
     'blue' : 'b',
     'green': 'g',
     'red' : 'r',
-    'cyan' : 'c',
-    'yellow' : 'y',
+    'brown' : 'c',
+    'orange' : 'y',
     'black' : 'k',
     'white' : 'w',
     'purple': 'm'
@@ -40,8 +40,8 @@ def extract_points(gcode_file_path):
                 y_match = re.search(r'Y([-\d.]+)', line)
                 
                 if x_match and y_match:
-                    x = int(x_match.group(1))
-                    y = int(y_match.group(1))
+                    x = float(x_match.group(1))
+                    y = float(y_match.group(1))
                     all_points.append((x, y))
                 else:
                     print(f"Warning: G1 command without X,Y coordinates on line {line_num}: {line}")
@@ -53,8 +53,8 @@ def extract_points(gcode_file_path):
                 y_match = re.search(r'Y([-\d.]+)', line)
                 
                 if x_match and y_match:
-                    x = int(x_match.group(1))
-                    y = int(y_match.group(1))
+                    x = float(x_match.group(1))
+                    y = float(y_match.group(1))
                     g0_points.append((x, y))
                 else:
                     print(f"Warning: G0 command without X,Y coordinates on line {line_num}: {line}")
@@ -63,7 +63,7 @@ def extract_points(gcode_file_path):
 
 
 """Visualize g-code"""
-def visualize_gcode(gcode_file_path, output_file):
+def visualize_gcode(gcode_file_path, output_folder, output_file):
 
     # Extract all points
     all_points, g0_points = extract_points(gcode_file_path)
@@ -108,8 +108,8 @@ def visualize_gcode(gcode_file_path, output_file):
                 y_match = re.search(r'Y([-\d.]+)', line)
                 
                 if x_match and y_match:
-                    x = int(x_match.group(1))
-                    y = int(y_match.group(1))
+                    x = float(x_match.group(1))
+                    y = float(y_match.group(1))
                     points.append((x, y))
                 else:
                     print(f"Warning: G1 command without X,Y coordinates on line {line_num}: {line}")
@@ -128,7 +128,7 @@ def visualize_gcode(gcode_file_path, output_file):
     
 
     # # Plot G0 points (the starting point for each contour)
-   # plt.plot(x_g0, y_g0, 'k^', markersize = 8, alpha = 0.7, label = 'Start Point of Contour (in order)')
+    #plt.plot(x_g0, y_g0, 'k^', markersize = 8, alpha = 0.7, label = 'Start Point of Contour (in order)')
     
     # Mark first and last point of robot path
     plt.plot(x_all[0], y_all[0], 'go', markersize=10, markeredgecolor='black', label='Start')
@@ -142,22 +142,22 @@ def visualize_gcode(gcode_file_path, output_file):
     plt.gca().invert_yaxis() # flip the y axis
     plt.xlabel('X Coordinate')
     plt.ylabel('Y Coordinate')
-    plt.title(f'Robot Drawing Path: {gcode_file_path}\n({len(all_points)} points)')
+    plt.title(f'Robot Drawing Path: {len(all_points)} points)')
     plt.grid(True, alpha=0.3)
     plt.axis('equal')
     plt.legend()
     
     plt.tight_layout()
-    plt.savefig("../output/"f"{output_file}") 
+    plt.savefig(f"{output_folder}/{output_file}") 
     plt.show()
 
     
     # Print detailed information
     print(f"Found {len(all_points)} coordinates")
-    print(f"X range: {min(x_vals)} to {max(x_vals)}")
-    print(f"Y range: {min(y_vals)} to {max(y_vals)}")
-    print(f"First point: X{x_vals[0]} Y{y_vals[0]}")
-    print(f"Last point: X{x_vals[-1]} Y{y_vals[-1]}")
+    print(f"X range: {min(x_vals):.5f} to {max(x_vals):.5f}")
+    print(f"Y range: {min(y_vals):.5f} to {max(y_vals):.5f}")
+    print(f"First point: X{x_vals[0]:.5f} Y{y_vals[0]:.5f}")
+    print(f"Last point: X{x_vals[-1]:.5f} Y{y_vals[-1]:.5f}")
     
     return all_points
 
