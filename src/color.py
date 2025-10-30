@@ -142,31 +142,36 @@ def detectColor(image, contour, color_masks, stroke_width =30):
 
                 
 
-def splitContoursHorizontally(points, top_y, bottom_y, split_y = 100):
+def splitContoursHorizontally(contour, color, split_y = 100):
     """split the drawing space into even rows given a specified row height"""
+    split_contours= []
 
-    # if the bounding region of the contour falls in the row, no need to split
-    if int(top_y // split_y) == int(bottom_y // split_y):
-        return [points]
+    if len(contour) == 0:
+        return []
     
-    if len(points) == 0:
-        return[points]
+    # if the bounding region of contour falls in the row, no need to split
+    x,y,w,h = cv2.boundingRect(contour)
+    if int(y // split_y) == int((y+h)// split_y):
+        split_contours.append({'color':color,
+                                'contour': contour})
+        return split_contours
+
+    # convert contour to points
+    points = contour.reshape(-1,2)
+   
     #breakpoint()
     # find total rows to get number of contours after splitting
-    first_row = int(top_y // split_y)
-    total_rows = int(math.ceil(bottom_y/ split_y) - first_row)
-    split_contours= [[] for _ in range(total_rows)]
+    first_row = int(y // split_y)
+    total_rows = math.ceil((y+h)/ split_y) - first_row
 
     # add points to the current row
     row_points = []
     last_point = points[-1]
-    current_index = int(points[0][1] // split_y) - first_row
-
 
     for i in range(len(points) - 1):
         p1 = points[i]      # current point
         p2 = points[i+1]    # next point
-
+        #breakpoint()
         # add current point to current row and check if next point is in a different row
         row_points.append(p1)
         row_diff = abs(int(p2[1] // split_y) - int(p1[1] // split_y))
@@ -175,40 +180,38 @@ def splitContoursHorizontally(points, top_y, bottom_y, split_y = 100):
 
         goDown = p2[1] > p1[1]
 
-
         for j in range(row_diff):
             if goDown: # points going down, horizontal cross section below p1
-                y_coord = split_y * int(p1[1] / split_y) + split_y
+                y_coord = (split_y * int(p1[1] // split_y)) + split_y
             else: # points going up, horizontal cross section above p1
-                y_coord = split_y * int(p1[1] // split_y)
+                y_coord = (split_y* int(p2[1]//split_y)) + ((row_diff-j) * split_y)
 
             # find the intersection point on the cross section: y = mx + b
-            if ( (p2[0] - p1[0]) != 0):
+            if ((p2[0] - p1[0]) != 0):
                 slope = (p2[1] - p1[1]) / (p2[0] - p1[0])
                 b = p1[1] - (slope*p1[0])
-                x_coord = (y_coord - b) / slope
-            else:
+                x_coord = float((y_coord - b) / slope)
+            else: # vertical line
                 x_coord = p1[0]
 
             # add intersection point to current row and append to the list of split contours
             intersect = [x_coord,y_coord]
             row_points.append(intersect)
-            split_contours.append(row_points)
+            split_contour = np.array(row_points, dtype=np.float32).reshape(-1, 1, 2)
+            split_contours.append({'color': color, 
+                                   'contour': split_contour})
 
             # start the next row with intersection point    
             row_points = [intersect] 
             p1 = intersect 
-            # if goDown:
-            #     current_index = min(current_index + 1, total_rows - 1)
-            # else:
-            #     current_index = max(current_index - 1, 0)
-            current_index = current_index + 1 if goDown else current_index -1
+         
      
     # add last point to current row and append it to the split_contours
     row_points.append(last_point)
-    split_contours.append(row_points)
+    split_contour = np.array(row_points, dtype=np.float32).reshape(-1, 1, 2)
+    split_contours.append({'color': color,
+                           'contour': split_contour})
   
-
 
     return split_contours
     
