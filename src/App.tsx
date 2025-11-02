@@ -6,6 +6,9 @@ import { RobotControl } from './components/RobotControl';
 import { Navigation } from './components/Navigation';
 import { createClient } from './utils/supabase/client';
 
+// Create a single Supabase client instance
+const supabase = createClient();
+
 // Authentication Context
 interface AuthContextType {
   isAuthenticated: boolean;
@@ -43,8 +46,6 @@ export default function App() {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState<'snapshots' | 'upload' | 'robot'>('snapshots');
-
-  const supabase = createClient();
 
   // Check for existing session
   useEffect(() => {

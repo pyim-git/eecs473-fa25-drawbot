@@ -17,6 +17,7 @@ export function UploadSnapshot() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadComplete, setUploadComplete] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { accessToken } = useAuth();
@@ -142,25 +143,128 @@ export function UploadSnapshot() {
     setCanvasSize('');
     setUploadProgress(0);
     setUploadComplete(false);
+    setIsProcessing(false);
     setError('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
   };
 
+  const handleProcessImage = async () => {
+    setIsProcessing(true);
+    setError('');
+
+    try {
+      // Get the uploaded file blob
+      if (!selectedFile) {
+        setError('No image file selected');
+        return;
+      }
+
+      // Create FormData to send to local API
+      const formData = new FormData();
+      formData.append('image', selectedFile);
+      formData.append('name', snapshotName);
+
+      // Try to connect to local Python API (default: http://localhost:5000/process)
+      const localApiUrl = 'http://localhost:500/process';
+      
+      try {
+        const response = await fetch(localApiUrl, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Local API returned status ${response.status}`);
+        }
+
+        const result = await response.json();
+        console.log('Processing result:', result);
+        
+        // Show success message with output
+        let successMessage = 'Image processed successfully!';
+        if (result.output || result.message) {
+          successMessage += `\n\n${result.output || result.message}`;
+        }
+        alert(successMessage);
+        setError('');
+      } catch (fetchError) {
+        console.error('Local API error:', fetchError);
+        
+        // If local API is not available, provide download option
+        setError(
+          'Could not connect to local processing API.\n\n' +
+          'To process images locally:\n' +
+          '1. Start your local Python API server (Flask/FastAPI)\n' +
+          '2. Make sure it\'s running at http://localhost:500/process\n' +
+          '3. Or click "Download Image" to process manually'
+        );
+      }
+    } catch (error) {
+      console.error('Processing error:', error);
+      setError(error instanceof Error ? error.message : 'Processing failed');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDownloadImage = () => {
+    if (!selectedFile) {
+      setError('No image file to download');
+      return;
+    }
+
+    // Create a download link
+    const url = URL.createObjectURL(selectedFile);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = selectedFile.name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   if (uploadComplete) {
     return (
       <div className="max-w-2xl mx-auto space-y-6">
         <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
+          <CardContent className="flex flex-col items-center justify-center py-12 space-y-4">
             <CheckCircle className="h-16 w-16 text-green-500 mb-4" />
             <h2 className="text-xl mb-2">Upload Complete!</h2>
             <p className="text-muted-foreground text-center mb-6">
               Your snapshot "{snapshotName}" has been saved successfully.
             </p>
-            <Button onClick={resetForm}>
-              Upload Another Snapshot
-            </Button>
+            
+            {error && (
+              <Alert variant="destructive" className="w-full max-w-md">
+                <AlertDescription className="whitespace-pre-wrap">{error}</AlertDescription>
+              </Alert>
+            )}
+            
+            <div className="flex flex-col gap-3 w-full max-w-md">
+              <div className="flex gap-3">
+                <Button 
+                  onClick={handleProcessImage}
+                  disabled={isProcessing}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  {isProcessing ? 'Processing...' : 'Process Image'}
+                </Button>
+                <Button 
+                  onClick={handleDownloadImage}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  Download Image
+                </Button>
+              </div>
+              <Button onClick={resetForm} className="w-full">
+                Upload Another Snapshot
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
