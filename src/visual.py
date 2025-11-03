@@ -6,11 +6,12 @@ color_map = {
     'blue' : 'b',
     'green': 'g',
     'red' : 'r',
-    'brown' : 'c',
-    'orange' : 'y',
+    'yellow': 'yellow',
+    'brown' : '#A52A2A',
+    'orange' : 'orange',
     'black' : 'k',
     'white' : 'w',
-    'purple': 'm'
+    'purple': '#8F00FF'
 }
 
 
@@ -119,22 +120,22 @@ def visualize_gcode(gcode_file_path, output_folder, output_file):
                 x_vals = [p[0] for p in points]
                 y_vals = [p[1] for p in points]
 
-                plt.plot(x_vals, y_vals, f"{color}-", linewidth=2, alpha=0.7)
+                plt.plot(x_vals, y_vals, color, linewidth=2, alpha=0.7)
 
-                #plt.plot(x_vals, y_vals, 'ro', markersize=4, alpha=0.7)
+               # plt.plot(x_vals, y_vals, 'ro', markersize=4, alpha=0.7)
                 current_line += 1
                 points.clear()
 
     
 
     # # Plot G0 points (the starting point for each contour)
-    #plt.plot(x_g0, y_g0, 'k^', markersize = 8, alpha = 0.7, label = 'Start Point of Contour (in order)')
+   # plt.plot(x_g0, y_g0, 'k^', markersize = 8, alpha = 0.7, label = 'Start Point of Contour (in order)')
     
     # Mark first and last point of robot path
     plt.plot(x_all[0], y_all[0], 'go', markersize=10, markeredgecolor='black', label='Start')
     plt.plot(x_all[-1], y_all[-1], 'gs', markersize=10, markeredgecolor='black', label='End')
     
-    # Add point labels for all g0 points
+    # # # Add point labels for all g0 points
     # for i, (x, y) in enumerate(g0_points):  
     #     plt.annotate(f'P{i+1}', (x, y), xytext=(5, 5), textcoords='offset points', 
     #                 fontsize=8, alpha=0.7)
@@ -144,7 +145,11 @@ def visualize_gcode(gcode_file_path, output_folder, output_file):
     plt.ylabel('Y Coordinate')
     plt.title(f'Robot Drawing Path: {len(all_points)} points)')
     plt.grid(True, alpha=0.3)
-    plt.axis('equal')
+    #plt.axis('equal')
+    plt.gca().set_aspect(1300/1000)  # height/width
+
+   
+
     plt.legend()
     
     plt.tight_layout()

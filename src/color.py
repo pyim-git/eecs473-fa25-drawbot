@@ -17,56 +17,73 @@ hsv_weights = {
 hsv_ranges = {
     'black': {
         'lower': (0,0,0),
-        'upper':(180,50,50)
+        'upper':(180,50,30)
     },
     'gray': {
         'lower': (0,0,50),
-        'upper': (180, 50, 200)
+        'upper': (180, 40, 200)
     },
     'red':{
-        'lower1': (0, 90, 90), 'upper1': (10, 255, 255),
-        'lower2': (160, 90, 90), 'upper2': (180, 255, 255)   
+        'lower1': (0, 100, 100), 'upper1': (10, 255, 255),
+        'lower2': (160, 100, 100), 'upper2': (180, 255, 255)   
     },
     'orange': {
         'lower': (10, 80, 80),
-        'upper': (30,255,255)
+        'upper': (20,255,255)
+    },
+    'yellow': {
+        'lower': (20,80,80),
+        'upper': (40, 255,255)
     },
     'blue': {
-        'lower': (95,50,30),
-        'upper': (130, 255,255)
+        'lower': (95,100,50),
+        'upper': (125, 255,255)
     },
     'green': {
         'lower': (30, 50,50),
         'upper': (95, 255, 255),
     },
     'purple': {
-        'lower': (120, 50, 30),
-        'upper': (155, 255, 255)
+        'lower': (125, 50, 30),
+        'upper': (170, 255, 255)
     },
     'brown': {
-        'lower': (10, 100, 20),
-        'upper': (30,255,200)
+        'lower': (5, 60, 20),
+        'upper': (25,255,200)
     }
 }
 
 
-# user configurable drawing colors (at most 3)
-drawing_colors = [
+digital_colors = [
     'black',
     'blue',
     'red',
     'green',
     'purple',
     'orange',
-    'brown'
+    'brown',
+    'yellow',
+    'gray'
+]
+
+# no gray
+photo_colors = [
+    'black',
+    'blue',
+    'red',
+    'green',
+    'purple',
+    'orange',
+    'brown',
+    'yellow',
 ]
 
 # user configurable default color for undetected colors
-DEFAULT_COLOR = 'black' 
+DEFAULT_COLOR = 'yellow' 
 
 
 
-def getColorMasks(image):
+def getColorMasks(image, drawing_colors):
     """Create masks showing where each color appears in the entire image"""
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     
@@ -102,9 +119,15 @@ def getColorMasks(image):
 
 
 
-def assignColors(org_img, contours):
+def assignColors(org_img, contours, isDigital):
     """Loop through contours and assign colors"""
-    color_masks, _= getColorMasks(org_img)
+
+    if isDigital:
+        drawing_colors = digital_colors
+    else:
+        drawing_colors = photo_colors
+
+    color_masks, _= getColorMasks(org_img, drawing_colors)
     contour_colors = []
 
     for i, contour in enumerate(contours):
@@ -137,10 +160,16 @@ def detectColor(image, contour, color_masks, stroke_width =30):
             best_area = overlap_area
             best_color = color_name
   
+    # gray colors gets treated as black
+    if best_color == 'gray':
+        best_color = 'black'
+
     return best_color if best_color else 'unknown'
     
 
                 
+
+
 
 def splitContoursHorizontally(contour, color, split_y = 100):
     """split the drawing space into even rows given a specified row height"""
@@ -171,7 +200,7 @@ def splitContoursHorizontally(contour, color, split_y = 100):
     for i in range(len(points) - 1):
         p1 = points[i]      # current point
         p2 = points[i+1]    # next point
-        #breakpoint()
+        
         # add current point to current row and check if next point is in a different row
         row_points.append(p1)
         row_diff = abs(int(p2[1] // split_y) - int(p1[1] // split_y))
