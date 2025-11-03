@@ -9,13 +9,15 @@ from visual import *
 from color import *
 import pytesseract    # for text identification (to be implemented)
 from scipy.spatial import distance
+from skimage.morphology import medial_axis
+
 
 
 
 # Setup directories
-input_folder = "../whiteboard_img"
-output_folder = "../whitebaord_output"
-src_file = "colors.png"
+input_folder = "../color_img"
+output_folder = "../color_output"
+src_file = "mytest.png"
 gcode_file = src_file.rsplit('.', 1)[0] + ".gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
@@ -28,7 +30,7 @@ INPUT_WIDTH = 1500
 INPUT_HEIGHT = 1500
 
 # user needs to define whether image is digital or photo, different filtering techniques
-isDigital = False
+isDigital = True
 
 
 
@@ -56,7 +58,6 @@ class GcodeConverter:
         _, nongray_mask = cv2.threshold(saturation, 33, 255, cv2.THRESH_BINARY) 
         _, black_mask = cv2.threshold(value, 60, 255, cv2.THRESH_BINARY_INV)
         mask = cv2.bitwise_or(nongray_mask,black_mask)
-        cv2.imshow("mask", mask)
 
        
         # _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -72,8 +73,7 @@ class GcodeConverter:
         # thinning: detects center line and convert it into a single-pixel path
         skeleton = cv2.ximgproc.thinning(cleaned.astype(np.uint8), 
                                     thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
-        cv2.imshow("orgimg",org_img)
-        return skeleton, org_img
+        return skeleton, cleaned, org_img
 
    
     def preprocess_digital(self, image_path):
@@ -86,17 +86,139 @@ class GcodeConverter:
 
         # convert image to binary
         gray = cv2.cvtColor(org_img, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
-
+        _, binary = cv2.threshold(gray, 170, 255, cv2.THRESH_BINARY_INV)
+        #_, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         # # Connect small gaps to get smoother shapes
-        kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close, iterations=1)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
+        
 
-        # apply thinning
         skeleton = cv2.ximgproc.thinning(cleaned.astype(np.uint8), thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
         cv2.imshow('skeleton', skeleton)
 
-        return skeleton, org_img
+        return skeleton, cleaned, org_img
+
+
+    def findShapes(self, binary, skeleton_contours, result, thresholdClosed = 0.3, shape_similarity_threshold=0.15, size_diff = 0.03):
+     
+        # Detect unskeletonized contours using RETR_TREE to detect nested contours
+        contours, hierarchy= cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+
+        hierarchy = hierarchy[0]
+        skeletons = list(skeleton_contours)
+
+        if (len(hierarchy) == 0):
+            return skeletons
+        
+        # loop through all parent contours
+        for i, outer_contour in enumerate(contours):
+            if (cv2.contourArea(outer_contour) < 100):
+                continue
+
+            # only detect closed shapes
+            points = outer_contour.reshape(-1, 2) 
+            start = points[0]
+            end = points[-1]
+            distance = np.linalg.norm(start - end)
+
+            # check the distance between start and end to determine if closed shape
+            x, y, w, h = cv2.boundingRect(outer_contour)
+            contour_size = np.linalg.norm([w, h])
+            threshold = contour_size * thresholdClosed
+            if distance >= threshold:  
+                continue
+
+            perimeter = cv2.arcLength(outer_contour, True)
+            epsilon = 0.03 * perimeter        
+            simplified = cv2.approxPolyDP(outer_contour, epsilon, True)
+            simplified = simplified.reshape(-1, 2)
+
+            # only need to replace triangles or diamond shapes with sharp corners
+            if len(simplified) < 3 or len(simplified) > 4:
+                continue
+
+
+            if hierarchy[i][3] == -1:  # Outer contour 
+                first_child_idx = hierarchy[i][2]
+                
+                # loop through all child contours and look for similar shape to parent
+                while first_child_idx != -1:
+                    inner_contour = contours[first_child_idx]
+                    if (cv2.contourArea(inner_contour) < 100):
+                        continue
+                    
+                    # Check shape similarity
+                    score = cv2.matchShapes(outer_contour, inner_contour, cv2.CONTOURS_MATCH_I1, 0)
+
+                    if score < shape_similarity_threshold:
+
+                        # check that inner and outer contours have close proximity
+                        x1, y1, w1, h1 = cv2.boundingRect(outer_contour)
+                        x2, y2, w2, h2 = cv2.boundingRect(inner_contour)
+                        avg_size = (max(w1, h1) + max(w2, h2)) / 2
+                        
+                        # Distance threshold = percentage of average size
+                        adaptive_threshold = avg_size * size_diff
+                        
+                        # Check centroid distance
+                        centroid1 = np.mean(outer_contour.reshape(-1, 2), axis=0)
+                        centroid2 = np.mean(inner_contour.reshape(-1, 2), axis=0)
+                        pixel_distance = np.linalg.norm(centroid1 - centroid2)
+                        
+                        if (pixel_distance < adaptive_threshold):
+                            skeletons = self.replaceShapes(result,outer_contour, inner_contour, skeletons)       
+                            break                 
+
+                    first_child_idx = hierarchy[first_child_idx][0]
+                    
+
+        # cv2.drawContours(result, contours, -1, (0, 75, 150), 2) # Brown
+
+        return skeletons
+
+
+    def replaceShapes(self, result, outerContour, innerContour, skeletons, thresholdClosed = 0.3):
+        # loop through all the skeleton contours to find one enclosed between inner and outer contours
+        outer_x,outer_y, outer_w, outer_h = cv2.boundingRect(outerContour)
+        inner_x, inner_y, inner_w, inner_h = cv2.boundingRect(innerContour)
+
+        outerArea = cv2.contourArea(outerContour)
+        innerArea = cv2.contourArea(innerContour)
+
+        scale_factor = np.sqrt((outerArea + innerArea) / 2) / np.sqrt(outerArea)
+        for i, skeleton in enumerate(skeletons):
+            # find the skeleton thats between inner and outer contour
+            x,y,w,h = cv2.boundingRect(skeleton)
+
+            if not (outer_x < x < inner_x):
+                continue
+            
+            if not (outer_y < y < inner_y):
+                continue
+
+            skeletonArea = cv2.contourArea(skeleton)
+            if not (innerArea < skeletonArea < outerArea):
+                continue
+
+            # only replace closed shapes
+            points = skeleton.reshape(-1, 2) 
+            start = points[0]
+            end = points[-1]
+            distance = np.linalg.norm(start - end)
+
+            # check the distance between start and end to determine if closed shape
+            x, y, w, h = cv2.boundingRect(skeleton)
+            contour_size = np.linalg.norm([w, h])
+            threshold = contour_size * thresholdClosed
+            if distance < threshold:  
+                skeletons[i] = outerContour
+             #   cv2.drawContours(result, outerContour , -1, (20, 75, 100), 2) 
+                #cv2.drawContours(result, skeletons[i], -1, (100,100,200), 2)
+                #print('replaced')
+               # print(i)
+                break
+
+        return skeletons
 
 
 
@@ -216,8 +338,12 @@ class GcodeConverter:
 
 
     # adjustable min_distance threshold
-    def remove_close_points(self, points, min_distance=7.0): 
-        """Remove close points after approxPolyDP"""
+    def remove_close_points(self, points, increase, scale, min_distance=2.0): 
+        """Remove close points to increase step size"""
+        # if (increase):
+        #     min_distance = min_distance *scale
+        # else :
+        #     min_distance = float(min_distance / scale)
 
         if len(points) < 2:
             return points
@@ -257,9 +383,6 @@ class GcodeConverter:
         epsilon = precision * perimeter         # (adjustable for shape precision)
         simplified = cv2.approxPolyDP(contour, epsilon, True)
         points = simplified.reshape(-1, 2)
-                
-        # remove close points after simplification
-        points = self.remove_close_points(points)   
 
         if isClosed: # connect end to start if closed path
             points = np.vstack([points, points[0]])
@@ -268,20 +391,32 @@ class GcodeConverter:
     
      
 
+    
     def image_to_gcode(self, image_path, output_file):
         """wwrite gcode to output file"""
 
         # process the image to get clean contours
         if isDigital:
-            processed_img, org_img = self.preprocess_digital(image_path)
+            processed_img, binary, org_img = self.preprocess_digital(image_path)
         else:
-            processed_img, org_img = self.preprocess_photo(image_path)
+            processed_img, binary, org_img = self.preprocess_photo(image_path)
         
         # Find contours using RETR_TREE (detects nested contours)
-        contours, _ = cv2.findContours(processed_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+        skeleton_contours, _ = cv2.findContours(processed_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+        height, width = org_img.shape[:2]
+        result = np.zeros((height, width, 3), dtype=np.uint8)
+        #cv2.drawContours(result, skeleton_contours, -1, (0, 0, 255), 2)    # Red
+        #cv2.imshow("result", result)
+
+        result2 = np.zeros((height, width, 3), dtype=np.uint8)
+
+        skeleton_contours = self.findShapes(binary, skeleton_contours, result2)
+
+
+    
 
         # filter out small contours
-        contours = [c for c in contours if len(c) > 2] 
+        contours = [c for c in skeleton_contours if len(c) > 3] 
 
         # remove inner regions that are almost identical to the parent in the hierarchy
         contours = self.remove_contour_duplicates(contours)
@@ -307,6 +442,7 @@ class GcodeConverter:
 
         sorted_contours, b_boxes = self.sort_contours(color_contours)
 
+    
         # Open file for writing
         with open(output_file, 'w') as f:
             f.write("G90\n")  # Move to origin (0,0) at top left corner 
@@ -322,21 +458,24 @@ class GcodeConverter:
                     print("empty points")
                     continue
 
-                points = self.simplify_points(contour).astype(np.float32)
+                simplified_points = self.simplify_points(contour).astype(np.float32)
 
-                points = points/3  # convert from pixel to mm
+               # scaled_points= simplified_points/3  # convert from pixel to mm
+                increase = False
+                # remove close points after simplification
+                points = self.remove_close_points(simplified_points, increase, 3)   
 
                     
                 f.write(f"Contour {i+1}\n")
                 f.write(f"Color {color}\n")
 
                 # Move to first point (marker up)
-                f.write(f"G0 X{points[0][0]:.5f} Y{points[0][1]:.5f}\n")
+                f.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
                 
                 # Marker down, draw the contour
                 f.write(f"{self.M_DOWN}\n")
                 for point in points[1:]:
-                    f.write(f"G1 X{point[0]:.5f} Y{point[1]:.5f}\n")
+                    f.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
 
                 f.write(f"{self.M_UP}\n")
                 f.write("\n")
