@@ -32,7 +32,7 @@ def extract_points(gcode_file_path):
             contour_match = re.search('Contour\s+(\d+)', line)
             if contour_match: 
                 contour_num = contour_match.group(1)
-                print(f"contour number: {contour_num}")
+              #  print(f"contour number: {contour_num}")
             
             # process all points
             if line.startswith('G1') or line.startswith('G0'):                    
@@ -97,11 +97,11 @@ def visualize_gcode(gcode_file_path, output_folder, output_file):
             contour_num = 0
             if contour_match: 
                 contour_num = int(contour_match.group(1))
-                print(f"Contour number: {contour_num}")
+              #  print(f"Contour number: {contour_num}")
 
             if color_match:
                 color = color_map[color_match.group(1)]
-                print(f"Color {color}")
+              #  print(f"Color {color}")
             
             if line.startswith('G1') or line.startswith('G0'):                    
                 # Extract X and Y coordinates using regex
@@ -129,7 +129,7 @@ def visualize_gcode(gcode_file_path, output_folder, output_file):
     
 
     # # Plot G0 points (the starting point for each contour)
-   # plt.plot(x_g0, y_g0, 'k^', markersize = 8, alpha = 0.7, label = 'Start Point of Contour (in order)')
+    #plt.plot(x_g0, y_g0, 'k^', markersize = 8, alpha = 0.7, label = 'Start Point of Contour (in order)')
     
     # Mark first and last point of robot path
     plt.plot(x_all[0], y_all[0], 'go', markersize=10, markeredgecolor='black', label='Start')
@@ -159,10 +159,10 @@ def visualize_gcode(gcode_file_path, output_folder, output_file):
     
     # Print detailed information
     print(f"Found {len(all_points)} coordinates")
-    print(f"X range: {min(x_vals):.5f} to {max(x_vals):.5f}")
-    print(f"Y range: {min(y_vals):.5f} to {max(y_vals):.5f}")
-    print(f"First point: X{x_vals[0]:.5f} Y{y_vals[0]:.5f}")
-    print(f"Last point: X{x_vals[-1]:.5f} Y{y_vals[-1]:.5f}")
+    print(f"X range: {min(x_vals):.2f} to {max(x_vals):.2f}")
+    print(f"Y range: {min(y_vals):.2f} to {max(y_vals):.2f}")
+    print(f"First point: X{x_vals[0]:.2f} Y{y_vals[0]:.2f}")
+    print(f"Last point: X{x_vals[-1]:.2f} Y{y_vals[-1]:.2f}")
     
     return all_points
 

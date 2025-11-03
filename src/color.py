@@ -3,15 +3,7 @@ import numpy as np
 import math
 import pdb
 
-# HSV components have different weights for each color
-hsv_weights = {
-    'black': (0,0.2,0.8),
-    'gray': (0,0.7,0.3),
-    'red':  (0.8, 0.15, 0.05),
-    'blue': (0.7, 0.2, 0.1),
-    'green': (0.6, 0.3, 0.1),
-    'purple': (0.6, 0.35, 0.05),
-}
+
 
 # HSV ranges for each color
 hsv_ranges = {
