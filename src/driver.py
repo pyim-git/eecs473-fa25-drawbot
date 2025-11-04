@@ -8,15 +8,14 @@ import math
 from visual import *
 from color import *
 from scipy.spatial import distance
-from skimage.morphology import medial_axis
 from ocr import *
 
 
 
 # Setup directories
-input_folder = "color_img"
-output_folder = "color_output"
-src_file = "mytest.png"
+input_folder = "../color_img"
+output_folder = "../color_output"
+src_file = "mycolor.png"
 gcode_file = src_file.rsplit('.', 1)[0] + ".gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
@@ -25,12 +24,17 @@ if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
 # user-configurable drawing dimension in pixels 
-INPUT_WIDTH = 1500
-INPUT_HEIGHT = 1500
-#3 pixels = 1 mm
+WIDTH_MM = 1500
+HEIGHT_MM = 1500
+
+
+WIDTH_PIXELS = 1500
+HEIGHT_PIXELS = 1500
+# 3 pixels = 1 mm
 
 # user needs to define whether image is digital or photo, different filtering techniques
 isDigital = True
+
 
 
 
@@ -48,7 +52,7 @@ class GcodeConverter:
         if org_img is None:
             raise ValueError(f"Could not load image from {image_path}")
 
-        org_img = cv2.resize(org_img, (INPUT_WIDTH, INPUT_HEIGHT))
+        org_img = cv2.resize(org_img, (WIDTH_PIXELS, HEIGHT_PIXELS))
         hsv_img = cv2.cvtColor(org_img, cv2.COLOR_BGR2HSV)
         gray = cv2.cvtColor(hsv_img, cv2.COLOR_BGR2GRAY)
 
@@ -82,17 +86,17 @@ class GcodeConverter:
         if org_img is None:
             raise ValueError(f"Could not load image from {image_path}")
 
-        org_img = cv2.resize(org_img, (INPUT_WIDTH, INPUT_HEIGHT))
+        org_img = cv2.resize(org_img, (WIDTH_PIXELS, HEIGHT_PIXELS))
 
         # convert image to binary
         gray = cv2.cvtColor(org_img, cv2.COLOR_BGR2GRAY)
         _, binary = cv2.threshold(gray, 170, 255, cv2.THRESH_BINARY_INV)
         #_, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
         # # Connect small gaps to get smoother shapes
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
         cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
         
-
         skeleton = cv2.ximgproc.thinning(cleaned.astype(np.uint8), thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
         cv2.imshow('skeleton', skeleton)
 
@@ -165,10 +169,8 @@ class GcodeConverter:
                     pixel_distance = np.linalg.norm(centroid1 - centroid2)
 
                     if (pixel_distance < adaptive_threshold):
-                        skeletons = self.replaceShapes(result,outer_contour, inner_contour, skeletons)       
+                        self.replaceShapes(result,outer_contour, inner_contour, skeletons)       
                                  
-
-
         # cv2.drawContours(result, contours, -1, (0, 75, 150), 2) # Brown
 
         return skeletons
@@ -213,7 +215,7 @@ class GcodeConverter:
                 #cv2.drawContours(result, skeletons[i], -1, (100,100,200), 2)
                 #print('replaced')
                # print(i)
-                break
+                #break
 
         return skeletons
 
@@ -330,24 +332,20 @@ class GcodeConverter:
 
 
     # adjustable min_distance threshold
-    def remove_close_points(self, points, increase, scale, min_distance=2.0): 
+    def remove_close_points(self, points, min_distance): 
         """Remove close points to increase step size"""
-        # if (increase):
-        #     min_distance = min_distance *scale
-        # else :
-        #     min_distance = float(min_distance / scale)
-
         if len(points) < 2:
             return points
+        
         
         filtered_points = [points[0]]  # Always keep first point
         
         for i in range(1, len(points)):
             current_point = points[i]
             last_kept_point = filtered_points[-1]
-            
+
             distance = np.sqrt(np.sum((current_point - last_kept_point) ** 2))
-            
+
             if distance >= min_distance:
                 filtered_points.append(current_point)
             # else: skip this point (too close)
@@ -384,23 +382,25 @@ class GcodeConverter:
      
     def image_to_gcode(self, image_path, output_file):
         """wwrite gcode to output file"""
-        detected_words = detect_text(image_path, INPUT_WIDTH, INPUT_HEIGHT)
-        image_with_text = transpose_print_text_to_image(detected_words, image_path)
-        image_text_path = image_path+"_text_overlay.png"
-        cv2.imwrite(image_text_path, image_with_text)
+        # detected_words = detect_text(image_path, INPUT_WIDTH, INPUT_HEIGHT)
+        # image_with_text = transpose_print_text_to_image(detected_words, image_path)
+        # image_text_path = image_path+"_text_overlay.png"
+        # cv2.imwrite(image_text_path, image_with_text)
         # process the image to get clean contours
+        image_text_path = image_path
         if isDigital:
             processed_img, binary, org_img = self.preprocess_digital(image_text_path)
         else:
             processed_img, binary, org_img = self.preprocess_photo(image_text_path)
-        org_img = cv2.imread(image_path)
-        org_img = cv2.resize(org_img, (INPUT_WIDTH, INPUT_HEIGHT))
+        org_img = cv2.imread(image_text_path)
+        org_img = cv2.resize(org_img, (WIDTH_PIXELS, HEIGHT_PIXELS))
+
         # Find contours using RETR_TREE (detects nested contours)
         skeleton_contours, _ = cv2.findContours(processed_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
         height, width = org_img.shape[:2]
         result = np.zeros((height, width, 3), dtype=np.uint8)
-
-        skeleton_contours = self.findShapes(binary, skeleton_contours, result2)
+    
+        skeleton_contours = self.findShapes(binary, skeleton_contours, result)
 
         # filter out small contours
         contours = [c for c in skeleton_contours if len(c) > 3] 
@@ -445,14 +445,34 @@ class GcodeConverter:
                     print("empty points")
                     continue
 
+
+                # contour simplification: prune away points in line segments
                 simplified_points = self.simplify_points(contour).astype(np.float32)
 
-               # scaled_points= simplified_points/3  # convert from pixel to mm
-                increase = False
-                # remove close points after simplification
-                points = self.remove_close_points(simplified_points, increase, 3)   
+                # scale the pixels to millimeters 
+                scale_x = WIDTH_MM / WIDTH_PIXELS
+                scale_y = HEIGHT_MM / HEIGHT_PIXELS
+                scaled_points = simplified_points
+                scaled_points[:, 0] *= scale_x
+                scaled_points[:, 1] *= scale_y
 
-                    
+                length = cv2.arcLength(scaled_points, closed=True)
+                stepsize = 1
+                if (length > 800):
+                    stepsize = 8
+                elif (length > 400):
+                    stepsize = 6
+                elif (length > 200):
+                    stepsize = 5
+                elif (length > 100):
+                    stepsize = 4
+                elif (length > 50):
+                    stepsize = 3
+                elif (length > 20):
+                    stepsize = 2
+
+                # remove close points after scaling
+                points = self.remove_close_points(scaled_points, stepsize)   
                 f.write(f"Contour {i+1}\n")
                 f.write(f"Color {color}\n")
 
