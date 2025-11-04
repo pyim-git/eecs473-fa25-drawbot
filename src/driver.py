@@ -13,9 +13,9 @@ from ocr import *
 
 
 # Setup directories
-input_folder = "../whiteboard_img"
-output_folder = "../whiteboard_output"
-src_file = "circuit.png"
+input_folder = "../data"
+output_folder = "../output"
+src_file = "pi.png"
 gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"
 gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
@@ -25,15 +25,17 @@ if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
 # user-configurable drawing dimension in mm
-WIDTH_MM = 1500
-HEIGHT_MM = 1500
+WIDTH_MM = 10000
+HEIGHT_MM = 10000
 
 
+
+# default pixel dimensions set for clean image processing
 WIDTH_PIXELS = 1500
 HEIGHT_PIXELS = 1500
 
 # user defines whether input image is digital or photo
-isDigital = False
+isDigital = True
 
 
 
@@ -354,7 +356,7 @@ class GcodeConverter:
         return np.array(filtered_points)
     
 
-    def simplify_points(self, contour, threshold_Closed = 0.3, simplify=0.004):
+    def simplify_points(self, contour, threshold_Closed = 0.3, simplify=0.003):
         # check if the contour is closed or open path. 
         points = contour.reshape(-1, 2) 
         start = points[0]
@@ -405,8 +407,8 @@ class GcodeConverter:
     
         # detect triangles and diamonds, and make them look nicer
         skeleton_contours = self.findShapes(binary, skeleton_contours, result)
-       # cv2.drawContours(result, skeleton_contours, -1, (0, 255, 0), 2) 
-        #cv2.imshow('result', result)
+        cv2.drawContours(result, skeleton_contours, -1, (0, 255, 0), 2) 
+        cv2.imshow('result', result)
 
         # filter out small contours
         contours = [c for c in skeleton_contours if len(c) > 3] 
@@ -448,20 +450,13 @@ class GcodeConverter:
                 # contour simplification: prune away points in line segments
                 simplified_points = self.simplify_points(contour).astype(np.float32)
 
-                # scale the pixels to millimeters 
-                scale_x = WIDTH_MM / WIDTH_PIXELS
-                scale_y = HEIGHT_MM / HEIGHT_PIXELS
-                scaled_points = simplified_points
-                scaled_points[:, 0] *= scale_x
-                scaled_points[:, 1] *= scale_y
-
                 # determine step size based on length of the path
-                length = cv2.arcLength(scaled_points, closed=True)
+                length = cv2.arcLength(simplified_points, closed=True)
                 stepsize = 1
-                if (length > 800):
+                if (length > 500):
                     stepsize = 8
-                elif (length > 400):
-                    stepsize = 6
+                elif (length > 300):
+                    stepsize = 7
                 elif (length > 200):
                     stepsize = 5
                 elif (length > 100):
@@ -471,8 +466,17 @@ class GcodeConverter:
                 elif (length > 20):
                     stepsize = 2
 
-                # remove close points after scaling
-                points = self.remove_close_points(scaled_points, stepsize)   
+                # remove nearby points
+                simplified_points = self.remove_close_points(simplified_points, stepsize)   
+                
+
+                # scale the pixels to millimeters 
+                scale_x = WIDTH_MM / WIDTH_PIXELS
+                scale_y = HEIGHT_MM / HEIGHT_PIXELS
+                scaled_points = simplified_points
+                scaled_points[:, 0] *= scale_x
+                scaled_points[:, 1] *= scale_y
+                points = scaled_points
 
                 # Contour heading
                 f1.write(f"Contour {i+1}\n")
