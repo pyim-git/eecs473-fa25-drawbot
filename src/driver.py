@@ -468,7 +468,7 @@ class GcodeConverter:
 
                 # remove nearby points
                 simplified_points = self.remove_close_points(simplified_points, stepsize)   
-                
+
 
                 # scale the pixels to millimeters 
                 scale_x = WIDTH_MM / WIDTH_PIXELS
@@ -510,6 +510,8 @@ class GcodeConverter:
 
                     f2.write(f"A {angle_rad:.3f}\n")
                     f2.write(f"G1 {dist:.2f}\n")
+
+                    prev_point = point
                    
                 #f.write(f"{self.M_UP}\n")
                 f2.write("\n")
