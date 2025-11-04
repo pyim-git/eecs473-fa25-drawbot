@@ -13,9 +13,9 @@ from ocr import *
 
 
 # Setup directories
-input_folder = "../data"
-output_folder = "../output"
-src_file = "pi.png"
+input_folder = "../whiteboard_img"
+output_folder = "../whiteboard_output"
+src_file = "circuit.png"
 gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"
 gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
@@ -24,7 +24,7 @@ gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
-# user-configurable drawing dimension in pixels 
+# user-configurable drawing dimension in mm
 WIDTH_MM = 1500
 HEIGHT_MM = 1500
 
@@ -32,8 +32,8 @@ HEIGHT_MM = 1500
 WIDTH_PIXELS = 1500
 HEIGHT_PIXELS = 1500
 
-# user needs to define whether image is digital or photo
-isDigital = True
+# user defines whether input image is digital or photo
+isDigital = False
 
 
 
@@ -74,10 +74,10 @@ class GcodeConverter:
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2))
         cleaned = cv2.morphologyEx(filtered_binary, cv2.MORPH_CLOSE, kernel, iterations=1)
 
-        # thinning: detects center line and convert it into a single-pixel path
+        # thinning: detects center line and convert it into a single path
         skeleton = cv2.ximgproc.thinning(cleaned.astype(np.uint8), 
                                     thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
-        cv2.imshow('skeleton', skeleton)
+       # cv2.imshow('skeleton', skeleton)
 
         return skeleton, cleaned, org_img
 
@@ -100,13 +100,13 @@ class GcodeConverter:
         cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
         
         skeleton = cv2.ximgproc.thinning(cleaned.astype(np.uint8), thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
-        cv2.imshow('skeleton', skeleton)
 
         return skeleton, cleaned, org_img
 
 
     def findShapes(self, binary, skeleton_contours, result, thresholdClosed = 0.3, shape_similarity_threshold=0.15, size_diff = 0.03):
-     
+        """fix the skeletonized shapes with perfect shapes"""
+
         # Detect unskeletonized contours using RETR_TREE to detect nested contours
         contours, hierarchy= cv2.findContours(binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
 
@@ -116,17 +116,13 @@ class GcodeConverter:
         if (len(hierarchy) == 0):
             return skeletons
         
-        # loop through all parent contours
+        # loop through all outer contours
         for i, outer_contour in enumerate(contours):
 
             perimeter = cv2.arcLength(outer_contour, True)
             epsilon = 0.03 * perimeter        
             simplified = cv2.approxPolyDP(outer_contour, epsilon, True)
             simplified = simplified.reshape(-1, 2)
-
-            # only need to replace triangles or diamond shapes with sharp corners
-            if len(simplified) < 3 or len(simplified) > 4:
-                continue
 
             if (cv2.contourArea(simplified) < 50):
                 continue
@@ -216,7 +212,8 @@ class GcodeConverter:
 
         return skeletons
 
-    def sort_contours(self, contours, row_height_threshold=100):
+
+    def sort_contours(self, contours, row_height_threshold=100): 
         """sort contours from top to bottom, left to right"""
 
         # Get the height and width for each contour 
@@ -258,8 +255,10 @@ class GcodeConverter:
         return sorted_contours, sorted_boxes
 
 
-    def sort_split_contours(self, contours, split_y=100):
-        """sort contours by row number (based on split_y), then left to right"""
+
+    def sort_split_contours(self, contours, row_height=100):
+        """sort contours by rows with row height = gantry length.
+            Within a row, sort left to right"""
         
         contours_with_boxes = []
         for contour_data in contours:
@@ -267,7 +266,7 @@ class GcodeConverter:
             x, y, w, h = cv2.boundingRect(contour)
             
             # Calculate which row this contour belongs to
-            row_number = y // split_y
+            row_number = y // row_height
             
             contours_with_boxes.append({
                 'contour_data': contour_data,
@@ -308,11 +307,16 @@ class GcodeConverter:
 
 
 
-    def is_bbox_duplicate(self, contourA, contourB):
+    def is_bbox_duplicate(self, contourA, contourB, shape_threshold = 0.3, close_threshold= 3):
         """Check for contour duplicates by comparing their bounding boxes"""
-
+ 
         px, py, pw, ph = cv2.boundingRect(contourA)
         cx, cy, cw, ch = cv2.boundingRect(contourB)
+
+        # Check centroid distance
+        centroidA = np.mean(contourA.reshape(-1, 2), axis=0)
+        centroidB = np.mean(contourB.reshape(-1, 2), axis=0)
+        pixel_distance = np.linalg.norm(centroidA - centroidB)
         
         # Calculate overlap and size ratios
         overlap_A = max(0, min(px + pw, cx + cw) - max(px, cx))
@@ -326,7 +330,7 @@ class GcodeConverter:
         overlap_ratio = overlap_area / areaB if areaB > 0 else 0
         size_ratio = areaB / areaA if areaA > 0 else 0
         
-        return overlap_ratio > 0.8 and size_ratio > 0.8
+        return overlap_ratio > 0.8 and size_ratio > 0.8 and pixel_distance < close_threshold
 
 
     # adjustable min_distance threshold
@@ -334,7 +338,6 @@ class GcodeConverter:
         """Remove close points to increase step size"""
         if len(points) < 2:
             return points
-        
         
         filtered_points = [points[0]]  # Always keep first point
         
@@ -351,7 +354,7 @@ class GcodeConverter:
         return np.array(filtered_points)
     
 
-    def simplify_points(self, contour, threshold_Closed = 0.3, precision=0.004):
+    def simplify_points(self, contour, threshold_Closed = 0.3, simplify=0.004):
         # check if the contour is closed or open path. 
         points = contour.reshape(-1, 2) 
         start = points[0]
@@ -368,7 +371,7 @@ class GcodeConverter:
             
         # simplify the points in the contour 
         perimeter = cv2.arcLength(contour, True)
-        epsilon = (precision) * perimeter         # (adjustable for shape precision)
+        epsilon = (simplify) * perimeter        
         simplified = cv2.approxPolyDP(contour, epsilon, True)
         points = simplified.reshape(-1, 2)
 
@@ -379,7 +382,7 @@ class GcodeConverter:
     
      
     def image_to_gcode(self, image_path, output_file1, output_file2):
-        """wwrite gcode to output file"""
+        """write gcode to output file"""
         # detected_words = detect_text(image_path, INPUT_WIDTH, INPUT_HEIGHT)
         # image_with_text = transpose_print_text_to_image(detected_words, image_path)
         # image_text_path = image_path+"_text_overlay.png"
@@ -402,14 +405,14 @@ class GcodeConverter:
     
         # detect triangles and diamonds, and make them look nicer
         skeleton_contours = self.findShapes(binary, skeleton_contours, result)
-        cv2.drawContours(result, skeleton_contours, -1, (0, 255, 0), 2) 
-        cv2.imshow('result', result)
+       # cv2.drawContours(result, skeleton_contours, -1, (0, 255, 0), 2) 
+        #cv2.imshow('result', result)
 
         # filter out small contours
         contours = [c for c in skeleton_contours if len(c) > 3] 
 
         # remove inner regions that are almost identical to the parent in the hierarchy
-        #contours = self.remove_contour_duplicates(contours)
+        contours = self.remove_contour_duplicates(contours)
 
         # assign colors to all contours
         color_contours = assignColors(org_img, contours, isDigital)
@@ -478,7 +481,6 @@ class GcodeConverter:
                 f2.write(f"Contour {i+1}\n")
                 f2.write(f"Color {color}\n")
 
-
                 # Move to first point (marker up)
                 f1.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
 
@@ -486,7 +488,7 @@ class GcodeConverter:
                 dist = math.sqrt(points[0][0]**2 + points[0][1]**2)
                 angle_rad = math.atan2(points[0][1],points[0][0])
 
-                f2.write(f"A {angle_rad:.2f}\n")
+                f2.write(f"A {angle_rad:.3f}\n")
                 f2.write(f"G0 {dist:.2f}\n")
 
                 prev_point = points[0]
@@ -502,7 +504,7 @@ class GcodeConverter:
                     angle_rad = math.atan2(dy, dx)
                     dist = math.sqrt(dx**2 + dy**2)  
 
-                    f2.write(f"A {angle_rad:.2f}\n")
+                    f2.write(f"A {angle_rad:.3f}\n")
                     f2.write(f"G1 {dist:.2f}\n")
                    
                 #f.write(f"{self.M_UP}\n")

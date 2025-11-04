@@ -37,7 +37,7 @@ hsv_ranges = {
     },
     'purple': {
         'lower': (125, 50, 30),
-        'upper': (170, 255, 255)
+        'upper': (160, 255, 255)
     },
     'brown': {
         'lower': (5, 60, 20),
@@ -71,7 +71,7 @@ photo_colors = [
 ]
 
 # user configurable default color for undetected colors
-DEFAULT_COLOR = 'yellow' 
+DEFAULT_COLOR = 'brown' 
 
 
 
