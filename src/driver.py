@@ -112,7 +112,17 @@ class GcodeConverter:
         
         # loop through all parent contours
         for i, outer_contour in enumerate(contours):
-            if (cv2.contourArea(outer_contour) < 100):
+
+            perimeter = cv2.arcLength(outer_contour, True)
+            epsilon = 0.03 * perimeter        
+            simplified = cv2.approxPolyDP(outer_contour, epsilon, True)
+            simplified = simplified.reshape(-1, 2)
+
+            # only need to replace triangles or diamond shapes with sharp corners
+            if len(simplified) < 3 or len(simplified) > 4:
+                continue
+
+            if (cv2.contourArea(simplified) < 100):
                 continue
 
             # only detect closed shapes
@@ -128,49 +138,36 @@ class GcodeConverter:
             if distance >= threshold:  
                 continue
 
-            perimeter = cv2.arcLength(outer_contour, True)
-            epsilon = 0.03 * perimeter        
-            simplified = cv2.approxPolyDP(outer_contour, epsilon, True)
-            simplified = simplified.reshape(-1, 2)
-
-            # only need to replace triangles or diamond shapes with sharp corners
-            if len(simplified) < 3 or len(simplified) > 4:
-                continue
-
 
             if hierarchy[i][3] == -1:  # Outer contour 
                 first_child_idx = hierarchy[i][2]
                 
                 # loop through all child contours and look for similar shape to parent
-                while first_child_idx != -1:
-                    inner_contour = contours[first_child_idx]
-                    if (cv2.contourArea(inner_contour) < 100):
-                        continue
+                inner_contour = contours[first_child_idx]
+                if (cv2.contourArea(inner_contour) < 100):
+                    continue
+                
+                # Check shape similarity
+                score = cv2.matchShapes(outer_contour, inner_contour, cv2.CONTOURS_MATCH_I1, 0)
+                if score < shape_similarity_threshold:
+
+                    # check that inner and outer contours have close proximity
+                    x1, y1, w1, h1 = cv2.boundingRect(outer_contour)
+                    x2, y2, w2, h2 = cv2.boundingRect(inner_contour)
+                    avg_size = (max(w1, h1) + max(w2, h2)) / 2
                     
-                    # Check shape similarity
-                    score = cv2.matchShapes(outer_contour, inner_contour, cv2.CONTOURS_MATCH_I1, 0)
-
-                    if score < shape_similarity_threshold:
-
-                        # check that inner and outer contours have close proximity
-                        x1, y1, w1, h1 = cv2.boundingRect(outer_contour)
-                        x2, y2, w2, h2 = cv2.boundingRect(inner_contour)
-                        avg_size = (max(w1, h1) + max(w2, h2)) / 2
-                        
-                        # Distance threshold = percentage of average size
-                        adaptive_threshold = avg_size * size_diff
-                        
-                        # Check centroid distance
-                        centroid1 = np.mean(outer_contour.reshape(-1, 2), axis=0)
-                        centroid2 = np.mean(inner_contour.reshape(-1, 2), axis=0)
-                        pixel_distance = np.linalg.norm(centroid1 - centroid2)
-                        
-                        if (pixel_distance < adaptive_threshold):
-                            skeletons = self.replaceShapes(result,outer_contour, inner_contour, skeletons)       
-                            break                 
-
-                    first_child_idx = hierarchy[first_child_idx][0]
+                    # Distance threshold = percentage of average size
+                    adaptive_threshold = avg_size * size_diff
                     
+                    # Check centroid distance
+                    centroid1 = np.mean(outer_contour.reshape(-1, 2), axis=0)
+                    centroid2 = np.mean(inner_contour.reshape(-1, 2), axis=0)
+                    pixel_distance = np.linalg.norm(centroid1 - centroid2)
+
+                    if (pixel_distance < adaptive_threshold):
+                        skeletons = self.replaceShapes(result,outer_contour, inner_contour, skeletons)       
+                                 
+
 
         # cv2.drawContours(result, contours, -1, (0, 75, 150), 2) # Brown
 
@@ -402,10 +399,6 @@ class GcodeConverter:
         skeleton_contours, _ = cv2.findContours(processed_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
         height, width = org_img.shape[:2]
         result = np.zeros((height, width, 3), dtype=np.uint8)
-        #cv2.drawContours(result, skeleton_contours, -1, (0, 0, 255), 2)    # Red
-        #cv2.imshow("result", result)
-
-        result2 = np.zeros((height, width, 3), dtype=np.uint8)
 
         skeleton_contours = self.findShapes(binary, skeleton_contours, result2)
 
