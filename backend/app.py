@@ -17,6 +17,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 from werkzeug.utils import secure_filename
+from driver import *
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for browser requests
@@ -26,7 +27,7 @@ UPLOAD_FOLDER = './uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-def process_image(image_path, name):
+def process_image(image_path, name, image_type, width_mm, height_mm):
     """
     Process the image - replace this with your actual processing logic.
     
@@ -37,6 +38,16 @@ def process_image(image_path, name):
     Returns:
         dict: Processing result with status and output
     """
+    converter = GcodeConverter(width_mm, height_mm, image_type)
+    try:
+        image_path = f"{input_folder}/{src_file}" 
+        output_file1, output_file2 = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file1}", f"{output_folder}/{gcode_file2}" )
+        print(f"G-code saved to: {output_file1} and {output_file2}")
+        visualize_gcode(output_file1, f"{output_folder}", gcode_plotfile)
+
+    except Exception as e:
+        print(f"Error with custom image: {e}")
+
     # TODO: Add your image processing logic here
     # Examples:
     # - Convert to grayscale
@@ -54,8 +65,8 @@ def process_image(image_path, name):
         'file_size': file_size
     }
 
-@app.route('/process', methods=['POST'])
-def process():
+@app.route('/process/<image_type>/<width_mm>/<height_mm>', methods=['POST'])
+def process(image_type, width_mm, height_mm):
     """Handle image processing requests"""
     try:
         # Check if image file is present
@@ -74,7 +85,7 @@ def process():
         file.save(filepath)
         
         # Process the image
-        result = process_image(filepath, name)
+        result = process_image(filepath, name, image_type, int(width_mm), int(height_mm))
         
         return jsonify(result), 200
         

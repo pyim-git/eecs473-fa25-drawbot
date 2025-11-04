@@ -35,7 +35,6 @@ export interface Snapshot {
   name: string;
   imageUrl?: string;
   createdAt: string;
-  canvasSize: string;
   storagePath?: string;
   fileSize?: number;
 }

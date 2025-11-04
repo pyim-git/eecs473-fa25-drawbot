@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -7,51 +7,49 @@ import {
 } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
-import { Textarea } from "./ui/textarea";
-import { Separator } from "./ui/separator";
+import { Alert, AlertDescription } from "./ui/alert";
 import {
   Bot,
   WifiOff,
-  Settings,
   CheckCircle,
-  ArrowUp,
-  ArrowDown,
-  Square,
+  Send,
+  Lightbulb,
 } from "lucide-react";
 import { toast } from "sonner@2.0.3";
 
 interface RobotStatus {
   isConnected: boolean;
+  ledOn: boolean;
 }
+const gcodeText = `
+G90
+Contour 1
+Color red
+G0 X863.00 Y169.00
+M3
+G1 X863.00 Y181.00
+G1 X860.00 Y185.00
+...
+M5
+`; // <-- paste full GCode here
 
 export function RobotControl() {
   const [robotStatus, setRobotStatus] = useState<RobotStatus>({
     isConnected: false,
+    ledOn: false,
   });
 
   const [isConnecting, setIsConnecting] = useState(false);
-  const [pidP, setPidP] = useState("");
-  const [pidI, setPidI] = useState("");
-  const [pidD, setPidD] = useState("");
-  const [gcode, setGcode] = useState("");
+  const [isSendingCommands, setIsSendingCommands] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
 
-  // Cleanup WebSocket on unmount
-  useEffect(() => {
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, []);
+  const hardcodedImage = "backend/color_output/myimage.png"; // ← put your image in /public/images/myimage.png
 
+  // --- Connection handling ---
   const handleConnect = async () => {
     setIsConnecting(true);
 
     try {
-      // Create WebSocket connection to the robot
       const ws = new WebSocket("ws://172.20.10.10/ws");
       wsRef.current = ws;
 
@@ -59,11 +57,11 @@ export function RobotControl() {
         console.log("WebSocket connected");
         toast.success("Connected to robot");
 
-        // Send "START_CONNECTION" message when connected
         ws.send("START_CONNECTION");
 
         setRobotStatus({
           isConnected: true,
+          ledOn: true,
         });
 
         setIsConnecting(false);
@@ -80,12 +78,12 @@ export function RobotControl() {
         toast.info("Disconnected from robot");
         setRobotStatus({
           isConnected: false,
+          ledOn: false,
         });
       };
 
       ws.onmessage = (event) => {
         console.log("Message from robot:", event.data);
-        // Handle messages from the robot here
         toast.info(`Robot: ${event.data}`);
       };
     } catch (error) {
@@ -97,61 +95,48 @@ export function RobotControl() {
 
   const handleDisconnect = () => {
     if (wsRef.current) {
+      if (wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send("END_CONNECTION");
+      }
       wsRef.current.close();
       wsRef.current = null;
     }
+
     setRobotStatus({
       isConnected: false,
+      ledOn: false,
     });
   };
 
-  const sendCommand = (command: string) => {
-    if (
-      wsRef.current &&
-      wsRef.current.readyState === WebSocket.OPEN
-    ) {
-      wsRef.current.send(command);
-      console.log("Sent command:", command);
-      toast.success(`Command sent: ${command}`);
-    } else {
+  const handleSendCommands = async () => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
       toast.error("Robot not connected");
+      return;
     }
-  };
 
-  const handleForward = () => {
-    sendCommand("FORWARD");
-  };
+    setIsSendingCommands(true);
 
-  const handleBackward = () => {
-    sendCommand("BACKWARD");
-  };
+    try {
+      // 1️⃣ Load the file from public/
+      const response = await fetch("backend/color_output/myimage.gcode");
+      const gcodeText = await response.text();
 
-  const handleStop = () => {
-    sendCommand("STOP");
-  };
+      // 2️⃣ Split & filter
+      const gcodeLines = gcodeText.split("\n").map(line => line.trim()).filter(line => line && !line.startsWith(";"));
+      console.log(`Loaded ${gcodeLines.length} GCode lines`);
 
-  const handlePidPKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      sendCommand(`PID_P:${pidP}`);
-    }
-  };
+      // 3️⃣ Send each line over WebSocket
+      for (const line of gcodeLines) {
+        wsRef.current.send(line+'\n');
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
 
-  const handlePidIKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      sendCommand(`PID_I:${pidI}`);
-    }
-  };
-
-  const handlePidDKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      sendCommand(`PID_D:${pidD}`);
-    }
-  };
-
-  const handleGcodeKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendCommand(`GCODE:${gcode}`);
+      toast.success(`Sent ${gcodeLines.length} commands`);
+    } catch (err) {
+      console.error("Failed to load or send GCode:", err);
+      toast.error("Error loading GCode file");
+    } finally {
+      setIsSendingCommands(false);
     }
   };
 
@@ -183,13 +168,15 @@ export function RobotControl() {
                   </p>
                 </div>
 
+                {/* LED Status - OFF */}
+                <div className="flex items-center justify-center gap-3 p-4 bg-muted rounded-lg">
+                  <Lightbulb className="h-6 w-6 text-muted-foreground" />
+                  <span className="text-sm">LED: OFF</span>
+                </div>
+
                 <div className="space-y-2">
-                  <h4 className="font-medium">
-                    Robot Connection
-                  </h4>
-                  <p className="text-sm text-muted-foreground">
-                    IP: 172.20.10.10
-                  </p>
+                  <h4 className="font-medium">Robot Connection</h4>
+                  <p className="text-sm text-muted-foreground">IP: 172.20.10.10</p>
                   <Button
                     className="w-full"
                     onClick={handleConnect}
@@ -214,26 +201,12 @@ export function RobotControl() {
                   </Badge>
                 </div>
 
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Battery className="h-4 w-4" />
-                      <span className="text-sm">Battery</span>
-                    </div>
-                    <span className="text-sm font-medium">
-                      {robotStatus.batteryLevel.toFixed(0)}%
-                    </span>
-                  </div>
-                  <Progress value={robotStatus.batteryLevel} />
-
-                  {robotStatus.batteryLevel < 20 && (
-                    <Alert>
-                      <AlertTriangle className="h-4 w-4" />
-                      <AlertDescription>
-                        Low battery! Consider charging soon.
-                      </AlertDescription>
-                    </Alert>
-                  )}
+                {/* LED Status - ON */}
+                <div className="flex items-center justify-center gap-3 p-4 bg-green-50 dark:bg-green-950 rounded-lg">
+                  <Lightbulb className="h-6 w-6 text-green-600 fill-green-600" />
+                  <span className="text-sm font-medium text-green-600">
+                    LED: ON
+                  </span>
                 </div>
 
                 <Button
@@ -252,7 +225,7 @@ export function RobotControl() {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Settings className="h-5 w-5" />
+              <Send className="h-5 w-5" />
               Robot Controls
             </CardTitle>
           </CardHeader>
@@ -261,120 +234,45 @@ export function RobotControl() {
               <div className="text-center py-12">
                 <Bot className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                 <p className="text-muted-foreground">
-                  Connect to a robot to access controls
+                  Connect to the robot to access controls
                 </p>
               </div>
             ) : (
               <>
-                {/* Movement Controls */}
+                {/* Hardcoded Processed Image */}
                 <div className="space-y-4">
-                  <h4 className="font-medium">
-                    Movement Controls
-                  </h4>
-
-                  <div className="flex flex-col items-center gap-4">
-                    <Button
-                      onClick={handleForward}
-                      className="w-32 flex items-center justify-center gap-2"
-                      size="lg"
-                    >
-                      <ArrowUp className="h-5 w-5" />
-                      Forward
-                    </Button>
-
-                    <div className="flex gap-4">
-                      <Button
-                        onClick={handleBackward}
-                        className="w-32 flex items-center justify-center gap-2"
-                        size="lg"
-                      >
-                        <ArrowDown className="h-5 w-5" />
-                        Backward
-                      </Button>
-
-                      <Button
-                        onClick={handleStop}
-                        variant="destructive"
-                        className="w-32 flex items-center justify-center gap-2"
-                        size="lg"
-                      >
-                        <Square className="h-5 w-5" />
-                        Stop
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* PID Control Variables */}
-                <div className="space-y-4">
-                  <h4 className="font-medium">
-                    PID Control Variables
-                  </h4>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="pid-p">P (Proportional)</Label>
-                      <Input
-                        id="pid-p"
-                        type="number"
-                        step="0.01"
-                        placeholder="0.0"
-                        value={pidP}
-                        onChange={(e) => setPidP(e.target.value)}
-                        onKeyDown={handlePidPKeyDown}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="pid-i">I (Integral)</Label>
-                      <Input
-                        id="pid-i"
-                        type="number"
-                        step="0.01"
-                        placeholder="0.0"
-                        value={pidI}
-                        onChange={(e) => setPidI(e.target.value)}
-                        onKeyDown={handlePidIKeyDown}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="pid-d">D (Derivative)</Label>
-                      <Input
-                        id="pid-d"
-                        type="number"
-                        step="0.01"
-                        placeholder="0.0"
-                        value={pidD}
-                        onChange={(e) => setPidD(e.target.value)}
-                        onKeyDown={handlePidDKeyDown}
-                      />
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Press Enter after typing to send each value to the robot
-                  </p>
-                </div>
-
-                <Separator />
-
-                {/* GCode Input */}
-                <div className="space-y-4">
-                  <h4 className="font-medium">
-                    GCode Commands
-                  </h4>
-                  <div className="space-y-2">
-                    <Textarea
-                      placeholder="Enter GCode commands here..."
-                      value={gcode}
-                      onChange={(e) => setGcode(e.target.value)}
-                      onKeyDown={handleGcodeKeyDown}
-                      rows={5}
-                      className="font-mono text-sm"
+                  <h4 className="font-medium">Processed Image Preview</h4>
+                  <div className="border rounded-lg overflow-hidden bg-muted">
+                    <img
+                      src={hardcodedImage}
+                      alt="Processed drawing"
+                      className="w-full h-auto"
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Press Enter to send (Shift+Enter for new line)
-                    </p>
                   </div>
+                </div>
+
+                {/* Send Commands */}
+                <div className="space-y-4">
+                  <h4 className="font-medium">GCode Commands</h4>
+                  <p className="text-sm text-muted-foreground">
+                    Send the processed GCode file to the robot
+                  </p>
+
+                  <Button
+                    onClick={handleSendCommands}
+                    disabled={isSendingCommands}
+                    size="lg"
+                    className="w-full"
+                  >
+                    {isSendingCommands ? (
+                      <span className="animate-pulse">Sending Commands...</span>
+                    ) : (
+                      <>
+                        <Send className="h-5 w-5 mr-2" />
+                        Send Commands
+                      </>
+                    )}
+                  </Button>
                 </div>
               </>
             )}

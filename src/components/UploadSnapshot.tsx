@@ -19,6 +19,9 @@ export function UploadSnapshot() {
   const [uploadComplete, setUploadComplete] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState('');
+  const [widthMM, setWidthMM] = useState('');
+  const [heightMM, setHeightMM] = useState('');
+  const [imageType, setImageType] = useState<'digital' | 'photo'>('digital');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { accessToken } = useAuth();
 
@@ -166,8 +169,8 @@ export function UploadSnapshot() {
       formData.append('image', selectedFile);
       formData.append('name', snapshotName);
 
-      // Try to connect to local Python API (default: http://localhost:5000/process)
-      const localApiUrl = 'http://localhost:500/process';
+      // Try to connect to local Python API (default: http://localhost:500/process)
+      const localApiUrl = 'http://localhost:500/process/' + imageType + '/' + widthMM + '/' + heightMM;
       
       try {
         const response = await fetch(localApiUrl, {
@@ -366,6 +369,46 @@ export function UploadSnapshot() {
               </Select>
             </div>
 
+            {/* Digital or Photo */}
+            <div className="space-y-2">
+              <Label htmlFor="image-type">Image Type</Label>
+              <Select value={imageType} onValueChange={setImageType} required>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select image type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="digital">Digital</SelectItem>
+                  <SelectItem value="photo">Photo</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Width (mm) */}
+            <div className="space-y-2">
+              <Label htmlFor="width-mm">Width (mm)</Label>
+              <Input
+                id="width-mm"
+                type="number"
+                placeholder="Enter width in mm"
+                value={widthMM}
+                onChange={(e) => setWidthMM(e.target.value)}
+                required
+              />
+            </div>
+
+            {/* Height (mm) */}
+            <div className="space-y-2">
+              <Label htmlFor="height-mm">Height (mm)</Label>
+              <Input
+                id="height-mm"
+                type="number"
+                placeholder="Enter height in mm"
+                value={heightMM}
+                onChange={(e) => setHeightMM(e.target.value)}
+                required
+              />
+            </div>
+               
             {error && (
               <Alert variant="destructive">
                 <AlertDescription>{error}</AlertDescription>
@@ -390,23 +433,6 @@ export function UploadSnapshot() {
               {isUploading ? 'Uploading...' : 'Upload Snapshot'}
             </Button>
           </form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardContent className="p-4">
-          <div className="flex items-start space-x-3">
-            <FileText className="h-5 w-5 text-muted-foreground mt-0.5" />
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Tips for better uploads:</p>
-              <ul className="text-sm text-muted-foreground space-y-1">
-                <li>• Use high-resolution images for best results</li>
-                <li>• Ensure good lighting and minimal shadows</li>
-                <li>• Crop images to show only the drawing area</li>
-                <li>• Name your snapshots descriptively for easy organization</li>
-              </ul>
-            </div>
-          </div>
         </CardContent>
       </Card>
     </div>

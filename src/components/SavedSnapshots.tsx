@@ -213,9 +213,6 @@ export function SavedSnapshots() {
                     <span>{formatDate(snapshot.createdAt)}</span>
                   </div>
                   
-                  <Badge variant="secondary" className="text-xs">
-                    {snapshot.canvasSize}
-                  </Badge>
                 </div>
                 
                 <div className="flex gap-2 mt-4">
@@ -245,7 +242,7 @@ export function SavedSnapshots() {
                       </div>
                       <div className="flex justify-between items-center pt-4">
                         <div className="text-sm text-muted-foreground">
-                          Created: {formatDate(snapshot.createdAt)} • Size: {snapshot.canvasSize}
+                          Created: {formatDate(snapshot.createdAt)} 
                         </div>
                         <div className="flex gap-2">
                           <Button
