@@ -7,16 +7,15 @@ import pdb
 import math
 from visual import *
 from color import *
-import pytesseract    # for text identification (to be implemented)
 from scipy.spatial import distance
 from skimage.morphology import medial_axis
-
+from ocr import *
 
 
 
 # Setup directories
-input_folder = "../color_img"
-output_folder = "../color_output"
+input_folder = "color_img"
+output_folder = "color_output"
 src_file = "mytest.png"
 gcode_file = src_file.rsplit('.', 1)[0] + ".gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
@@ -28,6 +27,7 @@ if not os.path.exists(output_folder):
 # user-configurable drawing dimension in pixels 
 INPUT_WIDTH = 1500
 INPUT_HEIGHT = 1500
+#3 pixels = 1 mm
 
 # user needs to define whether image is digital or photo, different filtering techniques
 isDigital = True
@@ -220,9 +220,6 @@ class GcodeConverter:
 
         return skeletons
 
-
-
-
     def sort_contours(self, contours, row_height_threshold=100):
         """sort contours from top to bottom, left to right"""
 
@@ -263,8 +260,6 @@ class GcodeConverter:
                 sorted_boxes.append(box)
     
         return sorted_contours, sorted_boxes
-
-
 
     def sort_split_contours(self, contours, split_y=100):
         """sort contours by row number (based on split_y), then left to right"""
@@ -390,17 +385,19 @@ class GcodeConverter:
         return points
     
      
-
-    
     def image_to_gcode(self, image_path, output_file):
         """wwrite gcode to output file"""
-
+        detected_words = detect_text(image_path, INPUT_WIDTH, INPUT_HEIGHT)
+        image_with_text = transpose_print_text_to_image(detected_words, image_path)
+        image_text_path = image_path+"_text_overlay.png"
+        cv2.imwrite(image_text_path, image_with_text)
         # process the image to get clean contours
         if isDigital:
-            processed_img, binary, org_img = self.preprocess_digital(image_path)
+            processed_img, binary, org_img = self.preprocess_digital(image_text_path)
         else:
-            processed_img, binary, org_img = self.preprocess_photo(image_path)
-        
+            processed_img, binary, org_img = self.preprocess_photo(image_text_path)
+        org_img = cv2.imread(image_path)
+        org_img = cv2.resize(org_img, (INPUT_WIDTH, INPUT_HEIGHT))
         # Find contours using RETR_TREE (detects nested contours)
         skeleton_contours, _ = cv2.findContours(processed_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
         height, width = org_img.shape[:2]
@@ -411,9 +408,6 @@ class GcodeConverter:
         result2 = np.zeros((height, width, 3), dtype=np.uint8)
 
         skeleton_contours = self.findShapes(binary, skeleton_contours, result2)
-
-
-    
 
         # filter out small contours
         contours = [c for c in skeleton_contours if len(c) > 3] 
