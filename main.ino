@@ -3,12 +3,6 @@
 // #include <ESPAsyncWebServer.h>
 // #include <AsyncTCP.h>
 
-// const char *mqtt_broker = "broker.emqx.io";
-// const char *topic = "emqx/esp32";
-// const char *mqtt_username = "emqx";
-// const char *mqtt_password = "public";
-// const int mqtt_port = 1883;
-
 // WifiClient webserver;
 // MotorController mc;
 // AsyncWebSocket ws("/ws");
@@ -66,5 +60,5 @@
 // }
 
 // void loop() {
-//   ws.cleanupClients();
+//   //ws.cleanupClients();
 // }
