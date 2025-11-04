@@ -13,10 +13,11 @@ from ocr import *
 
 
 # Setup directories
-input_folder = "../color_img"
-output_folder = "../color_output"
-src_file = "mycolor.png"
-gcode_file = src_file.rsplit('.', 1)[0] + ".gcode"
+input_folder = "../data"
+output_folder = "../output"
+src_file = "pi.png"
+gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"
+gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
 
@@ -30,9 +31,8 @@ HEIGHT_MM = 1500
 
 WIDTH_PIXELS = 1500
 HEIGHT_PIXELS = 1500
-# 3 pixels = 1 mm
 
-# user needs to define whether image is digital or photo, different filtering techniques
+# user needs to define whether image is digital or photo
 isDigital = True
 
 
@@ -59,8 +59,8 @@ class GcodeConverter:
 
         # create color masks: filters out all gray shadow regions
         hue, saturation, value = cv2.split(hsv_img)
-        _, nongray_mask = cv2.threshold(saturation, 33, 255, cv2.THRESH_BINARY) 
-        _, black_mask = cv2.threshold(value, 60, 255, cv2.THRESH_BINARY_INV)
+        _, nongray_mask = cv2.threshold(saturation,33, 255, cv2.THRESH_BINARY) 
+        _, black_mask = cv2.threshold(value, 70, 255, cv2.THRESH_BINARY_INV)
         mask = cv2.bitwise_or(nongray_mask,black_mask)
 
        
@@ -77,6 +77,8 @@ class GcodeConverter:
         # thinning: detects center line and convert it into a single-pixel path
         skeleton = cv2.ximgproc.thinning(cleaned.astype(np.uint8), 
                                     thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
+        cv2.imshow('skeleton', skeleton)
+
         return skeleton, cleaned, org_img
 
    
@@ -126,7 +128,7 @@ class GcodeConverter:
             if len(simplified) < 3 or len(simplified) > 4:
                 continue
 
-            if (cv2.contourArea(simplified) < 100):
+            if (cv2.contourArea(simplified) < 50):
                 continue
 
             # only detect closed shapes
@@ -148,7 +150,7 @@ class GcodeConverter:
                 
                 # loop through all child contours and look for similar shape to parent
                 inner_contour = contours[first_child_idx]
-                if (cv2.contourArea(inner_contour) < 100):
+                if (cv2.contourArea(inner_contour) < 50):
                     continue
                 
                 # Check shape similarity
@@ -211,11 +213,6 @@ class GcodeConverter:
             threshold = contour_size * thresholdClosed
             if distance < threshold:  
                 skeletons[i] = outerContour
-             #   cv2.drawContours(result, outerContour , -1, (20, 75, 100), 2) 
-                #cv2.drawContours(result, skeletons[i], -1, (100,100,200), 2)
-                #print('replaced')
-               # print(i)
-                #break
 
         return skeletons
 
@@ -259,6 +256,7 @@ class GcodeConverter:
                 sorted_boxes.append(box)
     
         return sorted_contours, sorted_boxes
+
 
     def sort_split_contours(self, contours, split_y=100):
         """sort contours by row number (based on split_y), then left to right"""
@@ -370,7 +368,7 @@ class GcodeConverter:
             
         # simplify the points in the contour 
         perimeter = cv2.arcLength(contour, True)
-        epsilon = precision * perimeter         # (adjustable for shape precision)
+        epsilon = (precision) * perimeter         # (adjustable for shape precision)
         simplified = cv2.approxPolyDP(contour, epsilon, True)
         points = simplified.reshape(-1, 2)
 
@@ -380,33 +378,38 @@ class GcodeConverter:
         return points
     
      
-    def image_to_gcode(self, image_path, output_file):
+    def image_to_gcode(self, image_path, output_file1, output_file2):
         """wwrite gcode to output file"""
         # detected_words = detect_text(image_path, INPUT_WIDTH, INPUT_HEIGHT)
         # image_with_text = transpose_print_text_to_image(detected_words, image_path)
         # image_text_path = image_path+"_text_overlay.png"
         # cv2.imwrite(image_text_path, image_with_text)
         # process the image to get clean contours
+
         image_text_path = image_path
+
+        # process the image and get a binary, skeletonized image
         if isDigital:
             processed_img, binary, org_img = self.preprocess_digital(image_text_path)
         else:
             processed_img, binary, org_img = self.preprocess_photo(image_text_path)
-        org_img = cv2.imread(image_text_path)
-        org_img = cv2.resize(org_img, (WIDTH_PIXELS, HEIGHT_PIXELS))
+
 
         # Find contours using RETR_TREE (detects nested contours)
         skeleton_contours, _ = cv2.findContours(processed_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
         height, width = org_img.shape[:2]
         result = np.zeros((height, width, 3), dtype=np.uint8)
     
+        # detect triangles and diamonds, and make them look nicer
         skeleton_contours = self.findShapes(binary, skeleton_contours, result)
+        cv2.drawContours(result, skeleton_contours, -1, (0, 255, 0), 2) 
+        cv2.imshow('result', result)
 
         # filter out small contours
         contours = [c for c in skeleton_contours if len(c) > 3] 
 
         # remove inner regions that are almost identical to the parent in the hierarchy
-        contours = self.remove_contour_duplicates(contours)
+        #contours = self.remove_contour_duplicates(contours)
 
         # assign colors to all contours
         color_contours = assignColors(org_img, contours, isDigital)
@@ -427,25 +430,18 @@ class GcodeConverter:
         # # sort the contours from left to right, top to bottom
         # sorted_contours, b_boxes = self.sort_split_contours(split_contours)
 
+        # sort the contours from left to right, top to bottom
         sorted_contours, b_boxes = self.sort_contours(color_contours)
 
     
-        # Open file for writing
-        with open(output_file, 'w') as f:
-            f.write("G90\n")  # Move to origin (0,0) at top left corner 
-
+        # Open file for writing: file1 for absolute positions, file2 for relative offsets
+        with open(output_file1, 'w') as f1, open(output_file2, 'w') as f2:
             print(f"Found {len(sorted_contours)} contours")
 
             for i, item in enumerate(sorted_contours):
                 color = item['color']
                 contour = item['contour']
-
-                points = contour.reshape(-1, 2)
-                if len(points) ==0:
-                    print("empty points")
-                    continue
-
-
+       
                 # contour simplification: prune away points in line segments
                 simplified_points = self.simplify_points(contour).astype(np.float32)
 
@@ -456,6 +452,7 @@ class GcodeConverter:
                 scaled_points[:, 0] *= scale_x
                 scaled_points[:, 1] *= scale_y
 
+                # determine step size based on length of the path
                 length = cv2.arcLength(scaled_points, closed=True)
                 stepsize = 1
                 if (length > 800):
@@ -473,24 +470,53 @@ class GcodeConverter:
 
                 # remove close points after scaling
                 points = self.remove_close_points(scaled_points, stepsize)   
-                f.write(f"Contour {i+1}\n")
-                f.write(f"Color {color}\n")
+
+                # Contour heading
+                f1.write(f"Contour {i+1}\n")
+                f1.write(f"Color {color}\n")
+
+                f2.write(f"Contour {i+1}\n")
+                f2.write(f"Color {color}\n")
+
 
                 # Move to first point (marker up)
-                f.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
-                
+                f1.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
+
+                # get the angle and relative offset to first point from origin
+                dist = math.sqrt(points[0][0]**2 + points[0][1]**2)
+                angle_rad = math.atan2(points[0][1],points[0][0])
+
+                f2.write(f"A {angle_rad:.2f}\n")
+                f2.write(f"G0 {dist:.2f}\n")
+
+                prev_point = points[0]
+
                 # Marker down, draw the contour
-                f.write(f"{self.M_DOWN}\n")
+                #f2.write(f"{self.M_DOWN}\n")
                 for point in points[1:]:
-                    f.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
+                    f1.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
 
-                f.write(f"{self.M_UP}\n")
-                f.write("\n")
+                    # get the angle and relative offset between last and next point
+                    dx = point[0] - prev_point[0]
+                    dy = point[1] - prev_point[1]
+                    angle_rad = math.atan2(dy, dx)
+                    dist = math.sqrt(dx**2 + dy**2)  
 
-            f.write("M30\n")      # end of drawing, program completes
+                    f2.write(f"A {angle_rad:.2f}\n")
+                    f2.write(f"G1 {dist:.2f}\n")
+                   
+                #f.write(f"{self.M_UP}\n")
+                f2.write("\n")
+                f1.write("\n")
 
-        print(f"G-code successfully written to {output_file}")
-        return output_file
+            f1.write("M30\n")      # end of drawing, program completes
+            f2.write("M30\n")      # end of drawing, program completes
+
+
+        print(f"G-code successfully written to {output_file1} and {output_file2}")
+        f1.close()
+        f2.close()
+        return output_file1, output_file2
     
 
 
@@ -500,9 +526,9 @@ def main():
     try:
  
         image_path = f"{input_folder}/{src_file}" 
-        output_file = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file}")
-        print(f"G-code saved to: {output_file}")
-        visualize_gcode(output_file, f"{output_folder}", gcode_plotfile)
+        output_file1, output_file2 = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file1}", f"{output_folder}/{gcode_file2}" )
+        print(f"G-code saved to: {output_file1} and {output_file2}")
+        visualize_gcode(output_file1, f"{output_folder}", gcode_plotfile)
 
     except Exception as e:
         print(f"Error with custom image: {e}")
