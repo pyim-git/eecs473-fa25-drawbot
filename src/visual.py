@@ -11,8 +11,11 @@ color_map = {
     'orange' : 'orange',
     'black' : 'k',
     'white' : 'w',
-    'purple': '#8F00FF'
+    'purple': '#8F00FF',
+    'pink': 'pink'
 }
+
+
 
 
 def extract_points(gcode_file_path):
@@ -116,28 +119,28 @@ def visualize_gcode(gcode_file_path, output_folder, output_file):
                     print(f"Warning: G1 command without X,Y coordinates on line {line_num}: {line}")
 
             # plot the contour
+
             if (contour_num > current_line) or line.startswith('M30'):
                 x_vals = [p[0] for p in points]
                 y_vals = [p[1] for p in points]
 
-                plt.plot(x_vals, y_vals, color, linewidth=2, alpha=0.7)
+                plt.plot(x_vals, y_vals, color, linewidth=1, alpha=0.7)
 
-               # plt.plot(x_vals, y_vals, 'ro', markersize=4, alpha=0.7)
+               # plt.plot(x_vals, y_vals, 'ro', markersize=2, alpha=0.7)
                 current_line += 1
                 points.clear()
 
     
-
     # # Plot G0 points (the starting point for each contour)
-    #plt.plot(x_g0, y_g0, 'k^', markersize = 8, alpha = 0.7, label = 'Start Point of Contour (in order)')
+    #plt.plot(x_g0, y_g0, 'k^', markersize = 2, alpha = 0.7, label = 'Start Point of Contour (in order)')
     
     # Mark first and last point of robot path
     plt.plot(x_all[0], y_all[0], 'go', markersize=10, markeredgecolor='black', label='Start')
     plt.plot(x_all[-1], y_all[-1], 'gs', markersize=10, markeredgecolor='black', label='End')
     
-    # # # Add point labels for all g0 points
+    # # # # Add point labels for all g0 points
     # for i, (x, y) in enumerate(g0_points):  
-    #     plt.annotate(f'P{i+1}', (x, y), xytext=(5, 5), textcoords='offset points', 
+    #     plt.annotate(f'P{i+1}', (x, y), xytext=(4, 4), textcoords='offset points', 
     #                 fontsize=8, alpha=0.7)
     
     plt.gca().invert_yaxis() # flip the y axis

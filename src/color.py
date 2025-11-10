@@ -9,7 +9,7 @@ import pdb
 hsv_ranges = {
     'black': {
         'lower': (0,0,0),
-        'upper':(180,50,30)
+        'upper':(180,60,50)
     },
     'gray': {
         'lower': (0,0,50),
@@ -17,7 +17,7 @@ hsv_ranges = {
     },
     'red':{
         'lower1': (0, 100, 100), 'upper1': (10, 255, 255),
-        'lower2': (160, 100, 100), 'upper2': (180, 255, 255)   
+        'lower2': (160, 80, 80), 'upper2': (180, 255, 255)   
     },
     'orange': {
         'lower': (10, 80, 80),
@@ -41,7 +41,7 @@ hsv_ranges = {
     },
     'brown': {
         'lower': (5, 60, 20),
-        'upper': (25,255,200)
+        'upper': (25,200,120)
     }
 }
 
@@ -71,7 +71,7 @@ photo_colors = [
 ]
 
 # user configurable default color for undetected colors
-DEFAULT_COLOR = 'brown' 
+DEFAULT_COLOR = 'pink' 
 
 
 
@@ -163,8 +163,11 @@ def detectColor(image, contour, color_masks, stroke_width =30):
 
 
 
-def splitContoursHorizontally(contour, color, split_y = 100):
-    """split the drawing space into even rows given a specified row height"""
+def splitContoursHorizontally(contour, color, split_y):
+    """split the drawing space into even rows given a specified row height
+        split_y = row height in mm
+        scale_factor = pixels/mm
+    """
     split_contours= []
 
     if len(contour) == 0:
@@ -179,15 +182,11 @@ def splitContoursHorizontally(contour, color, split_y = 100):
 
     # convert contour to points
     points = contour.reshape(-1,2)
-   
-    #breakpoint()
-    # find total rows to get number of contours after splitting
-    first_row = int(y // split_y)
-    total_rows = math.ceil((y+h)/ split_y) - first_row
 
     # add points to the current row
     row_points = []
     last_point = points[-1]
+
 
     for i in range(len(points) - 1):
         p1 = points[i]      # current point
@@ -195,9 +194,14 @@ def splitContoursHorizontally(contour, color, split_y = 100):
         
         # add current point to current row and check if next point is in a different row
         row_points.append(p1)
+        
         row_diff = abs(int(p2[1] // split_y) - int(p1[1] // split_y))
-        if (row_diff == 0 ): 
+        print(row_diff)
+        if (row_diff == 0):
             continue
+        if (row_diff == 1 and (p2[1] % split_y ==0) and (p1[1] % split_y == 0)):
+            continue
+        
 
         goDown = p2[1] > p1[1]
 
@@ -208,7 +212,7 @@ def splitContoursHorizontally(contour, color, split_y = 100):
                 y_coord = (split_y* int(p2[1]//split_y)) + ((row_diff-j) * split_y)
 
             # find the intersection point on the cross section: y = mx + b
-            if ((p2[0] - p1[0]) != 0):
+            if (abs(p2[0] - p1[0]) > .01):
                 slope = (p2[1] - p1[1]) / (p2[0] - p1[0])
                 b = p1[1] - (slope*p1[0])
                 x_coord = float((y_coord - b) / slope)
@@ -223,7 +227,7 @@ def splitContoursHorizontally(contour, color, split_y = 100):
                                    'contour': split_contour})
 
             # start the next row with intersection point    
-            row_points = [intersect] 
+            row_points = [intersect]
             p1 = intersect 
          
      
