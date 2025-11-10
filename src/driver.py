@@ -7,7 +7,6 @@ import pdb
 import math
 from visual import *
 from color import *
-#from scipy.spatial import distance
 from ocr import *
 
 
@@ -43,8 +42,6 @@ RowHeight = 100 # in mm
 
 class GcodeConverter:
     def __init__(self):
-        self.M_UP = "M5"     # marker up
-        self.M_DOWN = "M3"   # marker down
         self.POSITION = "G0" # robot positioning to starting point (fastest speed)
         self.TRACE = "G1"    # robot tracing a path to next point (slower speed)
    
@@ -170,8 +167,8 @@ class GcodeConverter:
                     if (pixel_distance < adaptive_threshold):
                         self.replaceShapes(result,outer_contour, inner_contour, skeletons)       
                                  
-        cv2.drawContours(result, contours, -1, (0, 75, 150), 2) # Brown
-        cv2.imshow('pre', result)
+       # cv2.drawContours(result, contours, -1, (0, 75, 150), 2) # Brown
+       # cv2.imshow('pre', result)
 
         return skeletons
 
@@ -214,49 +211,6 @@ class GcodeConverter:
         return skeletons
 
 
-    def sort_contours(self, contours, row_height_threshold=50): 
-        """sort contours from top to bottom, left to right"""
-
-        # Get the height and width for each contour 
-        bounding_boxes = [cv2.boundingRect(item['contour']) for item in contours]
-        
-        # sorts the contours based on increasing order of Y coordinates (top to bottom)
-        contours_with_boxes = list(zip(contours, bounding_boxes))
-        contours_with_boxes.sort(key=lambda x: x[1][1])  
-        
-        # Group contours into rows
-        rows = []
-        current_row = []
-        current_y = contours_with_boxes[0][1][1] if contours_with_boxes else 0
-        
-        for cnt, (x, y, w, h) in contours_with_boxes:
-            if abs(y - current_y) > row_height_threshold:
-                # New row if new contour's y coordinate is higher than current row
-                if current_row:
-                    rows.append(current_row)
-                current_row = [(cnt, (x, y, w, h))]
-                current_y = y
-            else:
-                # Same row 
-                current_row.append((cnt, (x, y, w, h)))
-        
-        if current_row:
-            rows.append(current_row)
-        
-        sorted_contours = []
-        sorted_boxes = []
-        
-        # Sort by increasing order of X within the same row
-        for row in rows:
-            row.sort(key=lambda x: x[1][0])  
-            for cnt, box in row:
-                sorted_contours.append(cnt)
-                sorted_boxes.append(box)
-    
-        return sorted_contours, sorted_boxes
-
-
-
     def sort_split_contours(self, contours, row_height):
         """sort contours by rows
             row height = gantry length"""
@@ -289,10 +243,8 @@ class GcodeConverter:
         
         # Extract sorted contours
         sorted_contours = [item['contour_data'] for item in contours_with_boxes]
-
-        sorted_boxes = [item['bbox'] for item in contours_with_boxes]
         
-        return sorted_contours, sorted_boxes
+        return sorted_contours
 
 
     def remove_contour_duplicates(self, contours):
@@ -441,6 +393,7 @@ class GcodeConverter:
 
     
     def filters_contours(self, skeleton_contours, skeleton_img):
+        """filters out small outlier paths"""
         filtered_contours = []
 
         for i, contour in enumerate(skeleton_contours):
@@ -489,8 +442,8 @@ class GcodeConverter:
     
         # detect triangles and diamonds, and make them look nicer
         skeleton_contours = self.findShapes(binary, skeleton_contours, result)
-        cv2.drawContours(result, skeleton_contours, -1, (0, 255, 0), 2) 
-        cv2.imshow('result', result)
+       # cv2.drawContours(result, skeleton_contours, -1, (0, 255, 0), 2) 
+       # cv2.imshow('result', result)
 
         # filter out small contours
         contours = self.filters_contours(skeleton_contours, skeleton_img)
@@ -515,7 +468,7 @@ class GcodeConverter:
             split_contours.extend(splitContoursHorizontally(contour, color, RowHeight))
 
         # sort the contours from left to right, top to bottom
-        sorted_contours, b_boxes = self.sort_split_contours(split_contours, RowHeight)
+        sorted_contours = self.sort_split_contours(split_contours, RowHeight)
 
 
         # Open file for writing: file1 for absolute positions, file2 for relative offsets
@@ -548,7 +501,6 @@ class GcodeConverter:
                 prev_point = points[0]
 
                 # Marker down, draw the contour
-                #f2.write(f"{self.M_DOWN}\n")
                 for point in points[1:]:
                     f1.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
 
@@ -563,7 +515,6 @@ class GcodeConverter:
 
                     prev_point = point
                    
-                #f.write(f"{self.M_UP}\n")
                 f2.write("\n")
                 f1.write("\n")
 
@@ -585,8 +536,8 @@ def main():
     try:
  
         image_path = f"{input_folder}/{src_file}" 
-        output_file1, output_file2 = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file1}", f"{output_folder}/{gcode_file2}" )
-        print(f"G-code saved to: {output_file1}") #and {output_file2}")
+        output_file1, _ = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file1}", f"{output_folder}/{gcode_file2}" )
+        print(f"G-code saved to: {output_file1}") 
         visualize_gcode(output_file1, f"{output_folder}", gcode_plotfile)
 
     except Exception as e:
