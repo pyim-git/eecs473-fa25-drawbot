@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -7,6 +7,8 @@ import {
 } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
+import { Separator } from "./ui/separator";
+
 import { Alert, AlertDescription } from "./ui/alert";
 import {
   Bot,
@@ -14,6 +16,10 @@ import {
   CheckCircle,
   Send,
   Lightbulb,
+  Settings,
+  Video,
+  VideoOff,
+  Camera
 } from "lucide-react";
 import { toast } from "sonner@2.0.3";
 
@@ -21,36 +27,83 @@ interface RobotStatus {
   isConnected: boolean;
   ledOn: boolean;
 }
-const gcodeText = `
-G90
-Contour 1
-Color red
-G0 X863.00 Y169.00
-M3
-G1 X863.00 Y181.00
-G1 X860.00 Y185.00
-...
-M5
-`; // <-- paste full GCode here
 
 export function RobotControl() {
   const [robotStatus, setRobotStatus] = useState<RobotStatus>({
-    isConnected: false,
+    isConnected: true,
     ledOn: false,
   });
 
   const [isConnecting, setIsConnecting] = useState(false);
   const [isSendingCommands, setIsSendingCommands] = useState(false);
+  const [isCameraEnabled, setIsCameraEnabled] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null> (null);
+
   const wsRef = useRef<WebSocket | null>(null);
+  const videoref = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   const hardcodedImage = "backend/color_output/myimage.png"; // ← put your image in /public/images/myimage.png
+
+  //clean up websocket and camera on unmount
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.curent.close();
+    }
+    stopCamera();
+  };
+}, []);
+
+const startCamera = async () => {
+  console.log("startCamera called");
+  try {
+    setCameraError(null);
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width: {ideal: 1280},
+        height: {ideal: 720},
+        facingMode: "user"
+      },
+      audio: false
+    });
+    console.log("VideoRef:", videoref.current);
+
+    if (videoref.current) {
+      videoref.current.srcObject = stream;
+      streamRef.current = stream;
+      setIsCameraEnabled(true);
+      console.log("Camera: ", isCameraEnabled)
+      toast.success("Camera started");
+    }
+  } catch (error) {
+    console.error("Camera error:", error);
+    const errorMessage = error instanceof Error ? error.message: "Failed to access camera";
+    setCameraError(errorMessage);
+    toast.error("Failed to access camera");
+  }
+};
+
+const stopCamera = () => {
+  if (streamRef.current) {
+    streamRef.current.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+  }
+  if (videoref.current) {
+    videoref.current.srcObject = null;
+  }
+  setIsCameraEnabled(false);
+  setCameraError(null);
+};
+
 
   // --- Connection handling ---
   const handleConnect = async () => {
     setIsConnecting(true);
 
     try {
-      const ws = new WebSocket("ws://172.20.10.10/ws");
+      const ws = new WebSocket("ws://35.3.131.7/ws");
+      //const ws = new WebSocket("ws://172.20.10.2/ws");
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -101,7 +154,7 @@ export function RobotControl() {
       wsRef.current.close();
       wsRef.current = null;
     }
-
+    stopCamera();
     setRobotStatus({
       isConnected: false,
       ledOn: false,
@@ -117,21 +170,34 @@ export function RobotControl() {
     setIsSendingCommands(true);
 
     try {
-      // 1️⃣ Load the file from public/
+      // Load the file from public/
       const response = await fetch("backend/color_output/myimage.gcode");
       const gcodeText = await response.text();
 
-      // 2️⃣ Split & filter
-      const gcodeLines = gcodeText.split("\n").map(line => line.trim()).filter(line => line && !line.startsWith(";"));
-      console.log(`Loaded ${gcodeLines.length} GCode lines`);
+      // Split & filter
+      //const gcodeLines = gcodeText.split("Contour").map(line => line.trim()).filter(line => line && !line.startsWith(";"));
+      //console.log(`Loaded ${gcodeLines.length} GCode lines`);
+      const contours = gcodeText
+        .split(/(?=Contour\s+\d+)/) // split BEFORE each "Contour <num>"
+        .map(chunk => chunk.trim()) // clean up whitespace
+        .filter(chunk => chunk.length > 0); // remove empties
 
-      // 3️⃣ Send each line over WebSocket
-      for (const line of gcodeLines) {
-        wsRef.current.send(line+'\n');
+      console.log(`Found ${contours.length} contours.`);
+
+      // Example: send one contour at a time through a WebSocket
+      for (const contour of contours) {
+        console.log("Sending contour chunk:\n", contour);
+        wsRef.current.send(contour+'\n');
         await new Promise(resolve => setTimeout(resolve, 10));
       }
+      wsRef.current.send("GCODE_END");
+      // // Send each line over WebSocket
+      // for (const line of gcodeLines) {
+      //   wsRef.current.send(line+'\n');
+      //   await new Promise(resolve => setTimeout(resolve, 10));
+      // }
 
-      toast.success(`Sent ${gcodeLines.length} commands`);
+      toast.success(`Sent ${contours.length} contours`);
     } catch (err) {
       console.error("Failed to load or send GCode:", err);
       toast.error("Error loading GCode file");
@@ -150,6 +216,41 @@ export function RobotControl() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+         {/* Webcam Feed - Full width when camera is enabled */}
+          {robotStatus.isConnected && isCameraEnabled && (
+            <Card className="lg:col-span-3">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2">
+                    <Camera className="h-5 w-5" />
+                    Robot Camera Feed
+                  </CardTitle>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={stopCamera}
+                  >
+                    <VideoOff className="h-4 w-4 mr-2" />
+                    Stop Camera
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="relative w-full bg-black rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
+                  <video
+                    ref={videoref}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Live video feed from your camera. Future updates will include image processing capabilities.
+                </p>
+              </CardContent>
+            </Card>
+          )}
         {/* Connection Panel */}
         <Card className="lg:col-span-1">
           <CardHeader>
@@ -176,7 +277,7 @@ export function RobotControl() {
 
                 <div className="space-y-2">
                   <h4 className="font-medium">Robot Connection</h4>
-                  <p className="text-sm text-muted-foreground">IP: 172.20.10.10</p>
+                  <p className="text-sm text-muted-foreground">IP: 172.20.10.2</p>
                   <Button
                     className="w-full"
                     onClick={handleConnect}
@@ -274,6 +375,41 @@ export function RobotControl() {
                     )}
                   </Button>
                 </div>
+
+                {/* Camera Control */}
+                <div className="space-y-4">
+                  <h4 className="font-medium">
+                    Camera Feed
+                  </h4>
+                  {!isCameraEnabled ? (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Enable camera to monitor robot movements in real-time
+                      </p>
+                      {cameraError && (
+                        <div className="text-sm text-red-500 p-3 bg-red-50 rounded-md">
+                          <p className="font-medium">Camera Error:</p>
+                          <p>{cameraError}</p>
+                          <p className="text-xs mt-2">Make sure camera permissions are granted in your browser settings.</p>
+                        </div>
+                      )}
+                      <Button 
+                        onClick={startCamera}
+                        variant="outline"
+                        className="w-full flex items-center justify-center gap-2"
+                      >
+                        <Video className="h-4 w-4" />
+                        Start Camera
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-green-600 p-3 bg-green-50 rounded-md flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4" />
+                      <span>Camera is active (see above for video feed)</span>
+                    </div>
+                  )}
+                </div>
+                <Separator />
               </>
             )}
           </CardContent>
