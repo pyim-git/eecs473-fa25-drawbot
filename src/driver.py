@@ -167,8 +167,8 @@ class GcodeConverter:
                     if (pixel_distance < adaptive_threshold):
                         self.replaceShapes(result,outer_contour, inner_contour, skeletons)       
                                  
-        cv2.drawContours(result, contours, -1, (0, 75, 150), 2) # Brown
-        cv2.imshow('pre', result)
+        # cv2.drawContours(result, contours, -1, (0, 75, 150), 2) # Brown
+        # cv2.imshow('pre', result)
 
         return skeletons
 
@@ -246,7 +246,6 @@ class GcodeConverter:
         for i, item in enumerate(contours_data):
             contour = contours_data[i]['contour_data']['contour']
             if (abs(contour[-1][0][0] - prev_x) <  abs(contour[0][0][0] - prev_x)):
-                print(f"{i}: reverse")
                 contours_data[i]['contour_data']['contour'] = contour[::-1]
                 prev_x = contour[0][0][0]
             else:
@@ -357,14 +356,12 @@ class GcodeConverter:
 
 
     def simplify_points(self, contour, threshold_Closed = 0.3):
-        # check if the contour is closed or open path. 
         points = contour.reshape(-1, 2) 
 
+        # check if the contour is closed or open path. 
         start = points[0]
         end = points[-1]
         distance = np.linalg.norm(start - end)
-
-        # if distance between start and end is close, close the path
         x, y, w, h = cv2.boundingRect(contour)
         contour_size = np.linalg.norm([w, h])
         threshold = contour_size * threshold_Closed
@@ -390,7 +387,7 @@ class GcodeConverter:
         else:
             simplify = 0.07
 
-
+        # contour simplification: prune away points in line segments
         epsilon = (simplify) * perimeter    
         simplified = cv2.approxPolyDP(contour, epsilon, True)
         points = simplified.reshape(-1, 2).astype(np.float32)
@@ -399,7 +396,6 @@ class GcodeConverter:
         if isClosed:    # connect end to start if closed path
             points = np.vstack([points, points[0]])
 
-        # contour simplification: prune away points in line segments
         length = cv2.arcLength(points, closed=True)
         stepsize = 1
         if (length > 500):
@@ -418,7 +414,6 @@ class GcodeConverter:
         # remove nearby points
         simplified_points = self.remove_close_points(points, stepsize)   
     
-
         return simplified_points
     
 
@@ -504,13 +499,10 @@ class GcodeConverter:
         for i in range(len(split_contours)):
             points = split_contours[i]['contour'].reshape(-1, 2)
             length = cv2.arcLength(split_contours[i]['contour'], closed=False)
-            print(f"{i} contour")
-            print('length')
-            print(length)
             if (length < 100):
                 continue
 
-            #if (length > )
+            # remove path retracing
             n = len(points)
             if n > 3:
                 half = int(n // 2)
@@ -519,20 +511,17 @@ class GcodeConverter:
                 for j in range(half):
                     x_dist = abs(points[j][0] - points[n-1-j][0])
                     y_dist = abs(points[j][1] - points[n-1-j][1])
-                    print(x_dist)
                     if (x_dist > (.01*length) or y_dist > (.01*length)):
-                        print(x_dist)
-                        print('false')
                         is_loopback = False
                         break
                 
                 if is_loopback:
-                    print('loop')
                     points = points[:half]
 
             split_contours[i]['contour'] = points.reshape(-1, 1, 2) 
 
-        # sort the contours from left to right, top to bottom
+
+        # sort the split contours
         sorted_contours = self.sort_split_contours(split_contours, RowHeight)
 
 
@@ -553,7 +542,6 @@ class GcodeConverter:
                 scaled_points[:, 1] *= scale_y
                 points = scaled_points
   
-
                 
                 # Contour heading
                 f1.write(f"Contour {i+1}\n")
