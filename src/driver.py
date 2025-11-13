@@ -14,7 +14,7 @@ from ocr import *
 # Setup directories
 input_folder = "../color_img"
 output_folder = "../color_output"
-src_file = "font.png"
+src_file = "path.jpeg"
 gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"
 gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
@@ -24,8 +24,8 @@ if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
 # user-configurable drawing dimension in mm
-WIDTH_MM = 1000
-HEIGHT_MM = 1000
+WIDTH_MM = 5000
+HEIGHT_MM = 5000
 
 
 
@@ -167,8 +167,8 @@ class GcodeConverter:
                     if (pixel_distance < adaptive_threshold):
                         self.replaceShapes(result,outer_contour, inner_contour, skeletons)       
                                  
-       # cv2.drawContours(result, contours, -1, (0, 75, 150), 2) # Brown
-       # cv2.imshow('pre', result)
+        cv2.drawContours(result, contours, -1, (0, 75, 150), 2) # Brown
+        cv2.imshow('pre', result)
 
         return skeletons
 
@@ -215,7 +215,7 @@ class GcodeConverter:
         """sort contours by rows
             row height = gantry length"""
         
-        contours_with_boxes = []
+        contours_data = []
         for contour_data in contours:
             contour = contour_data['contour']
             x, y, w, h = cv2.boundingRect(contour)
@@ -231,20 +231,57 @@ class GcodeConverter:
                 if (contour[0][0][0] < contour[-1][0][0]):
                     contour_data['contour'] = contour[::-1]
             
-            contours_with_boxes.append({
+            contours_data.append({
                 'contour_data': contour_data,
                 'bbox': (x, y, w, h),
                 'row_number': row_number
             })
         
         # Sort by row number first, then X left->right alternate with X right->left
-        contours_with_boxes.sort(key=lambda item: (item['row_number'], (item['bbox'][0] + item['bbox'][2]) if 
+        contours_data.sort(key=lambda item: (item['row_number'], (item['bbox'][0] + item['bbox'][2]) if 
                                                   (item['row_number']%2 == 0) else -item['bbox'][0]-item['bbox'][2]))
         
-        # Extract sorted contours
-        sorted_contours = [item['contour_data'] for item in contours_with_boxes]
+        # reverse the order to end to start if end is closer to previous endpoint
+        prev_x = 0
+        for i, item in enumerate(contours_data):
+            contour = contours_data[i]['contour_data']['contour']
+            if (abs(contour[-1][0][0] - prev_x) <  abs(contour[0][0][0] - prev_x)):
+                print(f"{i}: reverse")
+                contours_data[i]['contour_data']['contour'] = contour[::-1]
+                prev_x = contour[0][0][0]
+            else:
+                prev_x = contour[-1][0][0]
+
+
+        # merge contours if end1 = start2
+        merged_contours = []
+        current_row = -1
+        current_chain = None
         
-        return sorted_contours
+        for item in contours_data:
+            contour_data = item['contour_data']
+            row = item['row_number']
+            
+            if row != current_row:
+                # New row - save previous chain and start new
+                if current_chain is not None:
+                    merged_contours.append(current_chain)
+                current_chain = contour_data
+                current_row = row
+            else:
+                # if same row and end1 == start 2, merge
+                if np.array_equal(current_chain['contour'][-1][0], contour_data['contour'][0][0]):
+                    current_chain['contour'] = np.vstack([current_chain['contour'][:-1], contour_data['contour']])
+                else:
+                    # save current and start new chain
+                    merged_contours.append(current_chain)
+                    current_chain = contour_data
+        
+        if current_chain is not None:
+            merged_contours.append(current_chain)
+        
+        
+        return merged_contours
 
 
     def remove_contour_duplicates(self, contours):
@@ -322,6 +359,7 @@ class GcodeConverter:
     def simplify_points(self, contour, threshold_Closed = 0.3):
         # check if the contour is closed or open path. 
         points = contour.reshape(-1, 2) 
+
         start = points[0]
         end = points[-1]
         distance = np.linalg.norm(start - end)
@@ -333,6 +371,7 @@ class GcodeConverter:
         isClosed = False
         if distance < threshold:  
             isClosed = True
+
             
         # simplify the points in the contour 
         perimeter = cv2.arcLength(contour, True)
@@ -356,6 +395,7 @@ class GcodeConverter:
         simplified = cv2.approxPolyDP(contour, epsilon, True)
         points = simplified.reshape(-1, 2).astype(np.float32)
 
+
         if isClosed:    # connect end to start if closed path
             points = np.vstack([points, points[0]])
 
@@ -377,16 +417,9 @@ class GcodeConverter:
 
         # remove nearby points
         simplified_points = self.remove_close_points(points, stepsize)   
+    
 
-        # scale the pixels to millimeters 
-        scale_x = WIDTH_MM / WIDTH_PIXELS
-        scale_y = HEIGHT_MM / HEIGHT_PIXELS
-        scaled_points = simplified_points
-        scaled_points[:, 0] *= scale_x
-        scaled_points[:, 1] *= scale_y
-        points = scaled_points
-
-        return points
+        return simplified_points
     
 
 
@@ -442,8 +475,8 @@ class GcodeConverter:
     
         # detect triangles and diamonds, and make them look nicer
         skeleton_contours = self.findShapes(binary, skeleton_contours, result)
-       # cv2.drawContours(result, skeleton_contours, -1, (0, 255, 0), 2) 
-       # cv2.imshow('result', result)
+        cv2.drawContours(result, skeleton_contours, -1, (0, 255, 0), 2) 
+        cv2.imshow('result', result)
 
         # filter out small contours
         contours = self.filters_contours(skeleton_contours, skeleton_img)
@@ -467,6 +500,38 @@ class GcodeConverter:
 
             split_contours.extend(splitContoursHorizontally(contour, color, RowHeight))
 
+
+        for i in range(len(split_contours)):
+            points = split_contours[i]['contour'].reshape(-1, 2)
+            length = cv2.arcLength(split_contours[i]['contour'], closed=False)
+            print(f"{i} contour")
+            print('length')
+            print(length)
+            if (length < 100):
+                continue
+
+            #if (length > )
+            n = len(points)
+            if n > 3:
+                half = int(n // 2)
+                is_loopback = True
+                # if first half == second half, keep first half 
+                for j in range(half):
+                    x_dist = abs(points[j][0] - points[n-1-j][0])
+                    y_dist = abs(points[j][1] - points[n-1-j][1])
+                    print(x_dist)
+                    if (x_dist > (.01*length) or y_dist > (.01*length)):
+                        print(x_dist)
+                        print('false')
+                        is_loopback = False
+                        break
+                
+                if is_loopback:
+                    print('loop')
+                    points = points[:half]
+
+            split_contours[i]['contour'] = points.reshape(-1, 1, 2) 
+
         # sort the contours from left to right, top to bottom
         sorted_contours = self.sort_split_contours(split_contours, RowHeight)
 
@@ -479,6 +544,15 @@ class GcodeConverter:
                 color = item['color']
                 contour = item['contour']
                 points = contour.reshape(-1, 2)
+
+                # scale the pixels to millimeters 
+                scale_x = WIDTH_MM / WIDTH_PIXELS
+                scale_y = HEIGHT_MM / HEIGHT_PIXELS
+                scaled_points = points
+                scaled_points[:, 0] *= scale_x
+                scaled_points[:, 1] *= scale_y
+                points = scaled_points
+  
 
                 
                 # Contour heading
