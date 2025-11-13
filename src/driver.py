@@ -14,7 +14,7 @@ from ocr import *
 # Setup directories
 input_folder = "../color_img"
 output_folder = "../color_output"
-src_file = "path.jpeg"
+src_file = "notes.png"
 gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"
 gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
@@ -24,8 +24,8 @@ if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
 # user-configurable drawing dimension in mm
-WIDTH_MM = 5000
-HEIGHT_MM = 5000
+WIDTH_MM = 1000
+HEIGHT_MM = 1000
 
 
 
@@ -66,14 +66,13 @@ class GcodeConverter:
         _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
         filtered_binary = cv2.bitwise_and(binary, binary, mask=mask)
      
-        # connect shape by closing gaps between pixels
+        # for clustered text, this function creates whitespace between pixels
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2,2))
         cleaned = cv2.morphologyEx(filtered_binary, cv2.MORPH_OPEN, kernel, iterations=1)
 
         # thinning: detects center line and convert it into a single path
         skeleton = cv2.ximgproc.thinning(cleaned.astype(np.uint8), 
                                     thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
-       # cv2.imshow('skeleton', skeleton)
 
         return skeleton, cleaned, org_img
 
@@ -88,7 +87,7 @@ class GcodeConverter:
 
         # convert image to binary
         gray = cv2.cvtColor(org_img, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 205, 255, cv2.THRESH_BINARY_INV)
+        _, binary = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
 
         # # Connect small gaps to get smoother shapes
         # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
@@ -125,20 +124,6 @@ class GcodeConverter:
             if (cv2.contourArea(simplified) < 100):
                 continue
 
-            # only detect closed shapes
-            points = outer_contour.reshape(-1, 2) 
-            start = points[0]
-            end = points[-1]
-            distance = np.linalg.norm(start - end)
-
-            # check the distance between start and end to determine if closed shape
-            x, y, w, h = cv2.boundingRect(outer_contour)
-            contour_size = np.linalg.norm([w, h])
-            threshold = contour_size * thresholdClosed
-            if distance >= threshold:  
-                continue
-
-
             if hierarchy[i][3] == -1:  # Outer contour 
                 first_child_idx = hierarchy[i][2]
                 
@@ -155,8 +140,7 @@ class GcodeConverter:
                     x1, y1, w1, h1 = cv2.boundingRect(outer_contour)
                     x2, y2, w2, h2 = cv2.boundingRect(inner_contour)
                     avg_size = (max(w1, h1) + max(w2, h2)) / 2
-                    
-                    # Distance threshold = percentage of average size
+                
                     adaptive_threshold = avg_size * size_diff
                     
                     # Check centroid distance
@@ -167,14 +151,11 @@ class GcodeConverter:
                     if (pixel_distance < adaptive_threshold):
                         self.replaceShapes(result,outer_contour, inner_contour, skeletons)       
                                  
-        # cv2.drawContours(result, contours, -1, (0, 75, 150), 2) # Brown
-        # cv2.imshow('pre', result)
-
         return skeletons
 
 
     def replaceShapes(self, result, outerContour, innerContour, skeletons, thresholdClosed = 0.3):
-        # loop through all the skeleton contours to find one enclosed between inner and outer contours
+        # loop through all the skeleton contours to find one enclosed between inner and outer contour
         outer_x,outer_y, outer_w, outer_h = cv2.boundingRect(outerContour)
         inner_x, inner_y, inner_w, inner_h = cv2.boundingRect(innerContour)
 
@@ -192,21 +173,10 @@ class GcodeConverter:
                 continue
 
             skeletonArea = cv2.contourArea(skeleton)
-            if not (innerArea < skeletonArea < outerArea ):
+            if not (innerArea < skeletonArea < outerArea):
                 continue
 
-            # only replace closed shapes
-            points = skeleton.reshape(-1, 2) 
-            start = points[0]
-            end = points[-1]
-            distance = np.linalg.norm(start - end)
-
-            # check the distance between start and end to determine if closed shape
-            x, y, w, h = cv2.boundingRect(skeleton)
-            contour_size = np.linalg.norm([w, h])
-            threshold = contour_size * thresholdClosed
-            if distance < threshold:  
-                skeletons[i] = outerContour
+            skeletons[i] = outerContour
 
         return skeletons
 
@@ -272,13 +242,11 @@ class GcodeConverter:
                 if np.array_equal(current_chain['contour'][-1][0], contour_data['contour'][0][0]):
                     current_chain['contour'] = np.vstack([current_chain['contour'][:-1], contour_data['contour']])
                 else:
-                    # save current and start new chain
                     merged_contours.append(current_chain)
                     current_chain = contour_data
         
         if current_chain is not None:
             merged_contours.append(current_chain)
-        
         
         return merged_contours
 
@@ -418,7 +386,6 @@ class GcodeConverter:
     
 
 
-
     
     def filters_contours(self, skeleton_contours, skeleton_img):
         """filters out small outlier paths"""
@@ -468,10 +435,8 @@ class GcodeConverter:
         height, width = org_img.shape[:2]
         result = np.zeros((height, width, 3), dtype=np.uint8)
     
-        # detect triangles and diamonds, and make them look nicer
+        # detect skeletonized closed shapes and convert them to perfect shapes
         skeleton_contours = self.findShapes(binary, skeleton_contours, result)
-        cv2.drawContours(result, skeleton_contours, -1, (0, 255, 0), 2) 
-        cv2.imshow('result', result)
 
         # filter out small contours
         contours = self.filters_contours(skeleton_contours, skeleton_img)
@@ -487,22 +452,26 @@ class GcodeConverter:
         for i, item in enumerate(color_contours):
             contour = item['contour']
             color = item['color']
-            # simplify points in path and rescale points to mm
+            # simplify path by filtering out points
             points = self.simplify_points(contour).astype(np.float32)
+
+            # scale the pixels to millimeters 
+            scale_x = WIDTH_MM / WIDTH_PIXELS
+            scale_y = HEIGHT_MM / HEIGHT_PIXELS
+            scaled_points = points
+            scaled_points[:, 0] *= scale_x
+            scaled_points[:, 1] *= scale_y
+            points = scaled_points
 
             # split contour into horizontal sections
             contour = np.array(points, dtype=np.float32).reshape(-1, 1, 2)
-
             split_contours.extend(splitContoursHorizontally(contour, color, RowHeight))
 
-
+        # loop through all paths and find ones that retraces itself
         for i in range(len(split_contours)):
             points = split_contours[i]['contour'].reshape(-1, 2)
             length = cv2.arcLength(split_contours[i]['contour'], closed=False)
-            if (length < 100):
-                continue
 
-            # remove path retracing
             n = len(points)
             if n > 3:
                 half = int(n // 2)
@@ -511,12 +480,12 @@ class GcodeConverter:
                 for j in range(half):
                     x_dist = abs(points[j][0] - points[n-1-j][0])
                     y_dist = abs(points[j][1] - points[n-1-j][1])
-                    if (x_dist > (.01*length) or y_dist > (.01*length)):
+                    if (x_dist > (.02*length) or y_dist > (.02*length)):
                         is_loopback = False
                         break
                 
                 if is_loopback:
-                    points = points[:half]
+                    points = points[:half+1]  # go past midpoint to be safe 
 
             split_contours[i]['contour'] = points.reshape(-1, 1, 2) 
 
@@ -534,14 +503,6 @@ class GcodeConverter:
                 contour = item['contour']
                 points = contour.reshape(-1, 2)
 
-                # scale the pixels to millimeters 
-                scale_x = WIDTH_MM / WIDTH_PIXELS
-                scale_y = HEIGHT_MM / HEIGHT_PIXELS
-                scaled_points = points
-                scaled_points[:, 0] *= scale_x
-                scaled_points[:, 1] *= scale_y
-                points = scaled_points
-  
                 
                 # Contour heading
                 f1.write(f"Contour {i+1}\n")

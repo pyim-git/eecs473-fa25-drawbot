@@ -166,7 +166,6 @@ def detectColor(image, contour, color_masks, stroke_width =30):
 def splitContoursHorizontally(contour, color, split_y):
     """split the drawing space into even rows given a specified row height
         split_y = row height in mm
-        scale_factor = pixels/mm
     """
     split_contours= []
 
@@ -196,7 +195,6 @@ def splitContoursHorizontally(contour, color, split_y):
         row_points.append(p1)
         
         row_diff = abs(int(p2[1] // split_y) - int(p1[1] // split_y))
-        print(row_diff)
         if (row_diff == 0):
             continue
         if (row_diff == 1 and (p2[1] % split_y ==0) and (p1[1] % split_y == 0)):
@@ -242,20 +240,6 @@ def splitContoursHorizontally(contour, color, split_y):
     
 
         
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
