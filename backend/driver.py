@@ -7,16 +7,14 @@ import pdb
 import math
 from visual import *
 from color import *
-from scipy.spatial import distance
 from ocr import *
 
 
-
 # Setup directories
-input_folder = "uploads"
-output_folder = "color_output"
+input_folder = "backend/uploads"
+output_folder = "backend/color_output"
 src_file = "myimage.png"
-gcode_file1 = src_file.rsplit('.', 1)[0] + ".gcode"
+gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"
 gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
@@ -25,8 +23,9 @@ if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
 # default pixel dimensions set for clean image processing
-WIDTH_PIXELS = 1500
-HEIGHT_PIXELS = 1500
+WIDTH_PIXELS = 2000
+HEIGHT_PIXELS = 2000
+RowHeight = 100 # in mm
 
 #3 pixels = 1 mm
 
@@ -54,8 +53,8 @@ class GcodeConverter:
 
         # create color masks: filters out all gray shadow regions
         hue, saturation, value = cv2.split(hsv_img)
-        _, nongray_mask = cv2.threshold(saturation, 33, 255, cv2.THRESH_BINARY) 
-        _, black_mask = cv2.threshold(value, 70, 255, cv2.THRESH_BINARY_INV)
+        _, nongray_mask = cv2.threshold(saturation, 35, 255, cv2.THRESH_BINARY) 
+        _, black_mask = cv2.threshold(value, 60, 255, cv2.THRESH_BINARY_INV)
         mask = cv2.bitwise_or(nongray_mask,black_mask)
 
        
@@ -66,8 +65,8 @@ class GcodeConverter:
         filtered_binary = cv2.bitwise_and(binary, binary, mask=mask)
      
         # connect shape by closing gaps between pixels
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2))
-        cleaned = cv2.morphologyEx(filtered_binary, cv2.MORPH_CLOSE, kernel, iterations=1)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2,2))
+        cleaned = cv2.morphologyEx(filtered_binary, cv2.MORPH_OPEN, kernel, iterations=1)
 
         # thinning: detects center line and convert it into a single path
         skeleton = cv2.ximgproc.thinning(cleaned.astype(np.uint8), 
@@ -85,11 +84,13 @@ class GcodeConverter:
 
         # convert image to binary
         gray = cv2.cvtColor(org_img, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray, 170, 255, cv2.THRESH_BINARY_INV)
+        _, binary = cv2.threshold(gray, 205, 255, cv2.THRESH_BINARY_INV)
         #_, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         # # Connect small gaps to get smoother shapes
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
+        # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        # cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+        cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
         
 
         skeleton = cv2.ximgproc.thinning(cleaned.astype(np.uint8), thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
@@ -118,7 +119,7 @@ class GcodeConverter:
             simplified = cv2.approxPolyDP(outer_contour, epsilon, True)
             simplified = simplified.reshape(-1, 2)
 
-            if (cv2.contourArea(simplified) < 50):
+            if (cv2.contourArea(simplified) < 100):
                 continue
 
             # only detect closed shapes
@@ -176,7 +177,6 @@ class GcodeConverter:
         outerArea = cv2.contourArea(outerContour)
         innerArea = cv2.contourArea(innerContour)
 
-        scale_factor = np.sqrt((outerArea + innerArea) / 2) / np.sqrt(outerArea)
         for i, skeleton in enumerate(skeletons):
             # find the skeleton thats between inner and outer contour
             x,y,w,h = cv2.boundingRect(skeleton)
@@ -188,7 +188,7 @@ class GcodeConverter:
                 continue
 
             skeletonArea = cv2.contourArea(skeleton)
-            if not (innerArea < skeletonArea < outerArea):
+            if not (innerArea < skeletonArea < outerArea ):
                 continue
 
             # only replace closed shapes
@@ -207,50 +207,9 @@ class GcodeConverter:
 
         return skeletons
 
-    def sort_contours(self, contours, row_height_threshold=100):
-        """sort contours from top to bottom, left to right"""
-
-        # Get the height and width for each contour 
-        bounding_boxes = [cv2.boundingRect(item['contour']) for item in contours]
-        
-        # sorts the contours based on increasing order of Y coordinates (top to bottom)
-        contours_with_boxes = list(zip(contours, bounding_boxes))
-        contours_with_boxes.sort(key=lambda x: x[1][1])  
-        
-        # Group contours into rows
-        rows = []
-        current_row = []
-        current_y = contours_with_boxes[0][1][1] if contours_with_boxes else 0
-        
-        for cnt, (x, y, w, h) in contours_with_boxes:
-            if abs(y - current_y) > row_height_threshold:
-                # New row if new contour's y coordinate is higher than current row
-                if current_row:
-                    rows.append(current_row)
-                current_row = [(cnt, (x, y, w, h))]
-                current_y = y
-            else:
-                # Same row 
-                current_row.append((cnt, (x, y, w, h)))
-        
-        if current_row:
-            rows.append(current_row)
-        
-        sorted_contours = []
-        sorted_boxes = []
-        
-        # Sort by increasing order of X within the same row
-        for row in rows:
-            row.sort(key=lambda x: x[1][0])  
-            for cnt, box in row:
-                sorted_contours.append(cnt)
-                sorted_boxes.append(box)
-    
-        return sorted_contours, sorted_boxes
-
-    def sort_split_contours(self, contours, row_height=100):
-        """sort contours by rows with row height = gantry length.
-            Within a row, sort left to right"""
+    def sort_split_contours(self, contours, row_height):
+        """sort contours by rows
+            row height = gantry length"""
         
         contours_with_boxes = []
         for contour_data in contours:
@@ -259,6 +218,14 @@ class GcodeConverter:
             
             # Calculate which row this contour belongs to
             row_number = y // row_height
+
+            # sort points left to right in even rows
+            if (row_number % 2 ==0):
+                if (contour[0][0][0] > contour[-1][0][0]):
+                    contour_data['contour'] = contour[::-1]
+            else: # sort points right to left in odd rows
+                if (contour[0][0][0] < contour[-1][0][0]):
+                    contour_data['contour'] = contour[::-1]
             
             contours_with_boxes.append({
                 'contour_data': contour_data,
@@ -266,14 +233,14 @@ class GcodeConverter:
                 'row_number': row_number
             })
         
-        # Sort by row number first, then by X coordinate within each row
-        contours_with_boxes.sort(key=lambda item: (item['row_number'], item['bbox'][0]))
+        # Sort by row number first, then X left->right alternate with X right->left
+        contours_with_boxes.sort(key=lambda item: (item['row_number'], (item['bbox'][0] + item['bbox'][2]) if 
+                                                  (item['row_number']%2 == 0) else -item['bbox'][0]-item['bbox'][2]))
         
         # Extract sorted contours
         sorted_contours = [item['contour_data'] for item in contours_with_boxes]
-        sorted_boxes = [item['bbox'] for item in contours_with_boxes]
         
-        return sorted_contours, sorted_boxes
+        return sorted_contours
 
 
     def remove_contour_duplicates(self, contours):
@@ -322,7 +289,7 @@ class GcodeConverter:
         overlap_ratio = overlap_area / areaB if areaB > 0 else 0
         size_ratio = areaB / areaA if areaA > 0 else 0
         
-        return overlap_ratio > 0.8 and size_ratio > 0.8 and pixel_distance < close_threshold
+        return overlap_ratio > 0.8 and size_ratio > 0.7 and pixel_distance < close_threshold
 
 
     # adjustable min_distance threshold
@@ -346,7 +313,7 @@ class GcodeConverter:
         return np.array(filtered_points)
     
 
-    def simplify_points(self, contour, threshold_Closed = 0.3, simplify=0.003):
+    def simplify_points(self, contour, threshold_Closed = 0.3):
         # check if the contour is closed or open path. 
         points = contour.reshape(-1, 2) 
         start = points[0]
@@ -363,33 +330,117 @@ class GcodeConverter:
             
         # simplify the points in the contour 
         perimeter = cv2.arcLength(contour, True)
-        epsilon = (simplify) * perimeter        
-        simplified = cv2.approxPolyDP(contour, epsilon, True)
-        points = simplified.reshape(-1, 2)
+        if perimeter > 4000:
+            simplify = 0.001
+        if perimeter > 2000:
+            simplify = 0.002
+        elif perimeter > 900:
+            simplify = 0.003
+        elif perimeter > 250:
+            simplify = 0.0035
+        elif perimeter > 80:
+            simplify = 0.004
+        elif perimeter > 30:
+            simplify = 0.05
+        else:
+            simplify = 0.07
 
-        if isClosed: # connect end to start if closed path
+
+        epsilon = (simplify) * perimeter    
+        simplified = cv2.approxPolyDP(contour, epsilon, True)
+        points = simplified.reshape(-1, 2).astype(np.float32)
+
+        if isClosed:    # connect end to start if closed path
             points = np.vstack([points, points[0]])
+
+        # contour simplification: prune away points in line segments
+        length = cv2.arcLength(points, closed=True)
+        stepsize = 1
+        if (length > 500):
+            stepsize = 9
+        elif (length > 300):
+            stepsize = 7
+        elif (length > 200):
+            stepsize = 5
+        elif (length > 100):
+            stepsize = 4
+        elif (length > 50):
+            stepsize = 3
+        elif (length > 20):
+            stepsize = 2
+
+        # remove nearby points
+        simplified_points = self.remove_close_points(points, stepsize)   
+
+        # scale the pixels to millimeters 
+        scale_x = self.WIDTH_MM / WIDTH_PIXELS
+        scale_y = self.HEIGHT_MM / HEIGHT_PIXELS
+        scaled_points = simplified_points
+        scaled_points[:, 0] *= scale_x
+        scaled_points[:, 1] *= scale_y
+        points = scaled_points
 
         return points
     
-    
+    def filters_contours(self, skeleton_contours, skeleton_img):
+
+        """filters out small outlier paths"""
+
+        filtered_contours = []
+
+
+
+        for i, contour in enumerate(skeleton_contours):
+
+            if (cv2.arcLength(contour, True) > 25):
+
+                filtered_contours.append(contour)
+
+            else:
+
+
+
+                x, y, w, h = cv2.boundingRect(contour)
+
+                roi = skeleton_img[y:y+w, x:x+h]
+
+                contour_pixels = cv2.countNonZero(roi)
+
+
+
+                region_y = max(y+w+12, HEIGHT_PIXELS)
+
+                region_x = max(x+h+12, WIDTH_PIXELS)
+
+                roi = skeleton_img[y:region_y, x:region_x]
+
+                region_pixels = cv2.countNonZero(roi)
+
+
+
+                if (region_pixels >= contour_pixels):
+
+                    filtered_contours.append(contour)
+
+
+
+        return filtered_contours
+   
     def image_to_gcode(self, image_path, output_file1, output_file2):
         """write gcode to output file"""
         # process the image to get clean contours
         if self.isDigital:
             print("Running OCR for digital image")
             detected_words = detect_text(image_path, self.WIDTH_MM, self.HEIGHT_MM)
-            image_with_text = transpose_print_text_to_image(detected_words, image_path)
-            image_text_path = image_path+"_text_overlay.png"
-            cv2.imwrite(image_text_path, image_with_text)
-            processed_img, binary, org_img = self.preprocess_digital(image_text_path)
+            image_text_path = transpose_print_text_to_image(detected_words, image_path)
+            skeleton_img, binary, org_img = self.preprocess_digital(image_text_path)
             org_img = cv2.imread(image_path)
             org_img = cv2.resize(org_img, (self.WIDTH_MM, self.HEIGHT_MM))
         else:
             print("Processing photo image")
-            processed_img, binary, org_img = self.preprocess_photo(image_path)
+            skeleton_img, binary, org_img = self.preprocess_photo(image_path)
         # Find contours using RETR_TREE (detects nested contours)
-        skeleton_contours, _ = cv2.findContours(processed_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
+        skeleton_contours, _ = cv2.findContours(skeleton_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
         height, width = org_img.shape[:2]
         result = np.zeros((height, width, 3), dtype=np.uint8)
     
@@ -397,70 +448,43 @@ class GcodeConverter:
         skeleton_contours = self.findShapes(binary, skeleton_contours, result)
 
         # filter out small contours
-        contours = [c for c in skeleton_contours if len(c) > 3] 
+        contours = self.filters_contours(skeleton_contours, skeleton_img)
 
-        # remove inner regions that are almost identical to the parent in the hierarchy
+        # remove similar contours
         contours = self.remove_contour_duplicates(contours)
 
         # assign colors to all contours
         color_contours = assignColors(org_img, contours, self.isDigital)
 
         # TO DIVIDE CONTOURS INTO ROWS
-        # split_contours = []
-        # # simplify the contours by pruning away points
-        # for i, item in enumerate(color_contours):
-        #     contour = item['contour']
-        #     color = item['color']
-        #     points = self.simplify_points(contour).astype(np.float32)
 
-        #     # split contour into horizontal sections
-        #     contour = np.array(points, dtype=np.float32).reshape(-1, 1, 2)
+        split_contours = []
 
-        #     split_contours.extend(splitContoursHorizontally(contour, color))
+        for i, item in enumerate(color_contours):
+            contour = item['contour']
+            color = item['color']
+            # simplify points in path and rescale points to mm
+            points = self.simplify_points(contour).astype(np.float32)
+            # split contour into horizontal sections
+            contour = np.array(points, dtype=np.float32).reshape(-1, 1, 2)
+            split_contours.extend(splitContoursHorizontally(contour, color, RowHeight))
+        # sort the contours from left to right, top to bottom
 
-        # # sort the contours from left to right, top to bottom
-        # sorted_contours, b_boxes = self.sort_split_contours(split_contours)
+        sorted_contours = self.sort_split_contours(split_contours, RowHeight)
+        # Open file for writing: file1 for absolute positions, file2 for relative offsets
 
-        sorted_contours, b_boxes = self.sort_contours(color_contours)
         print("contours done")
         # Open file for writing
         with open(output_file1, 'w') as f1, open(output_file2, 'w') as f2:
             print(f"Found {len(sorted_contours)} contours")
 
             for i, item in enumerate(sorted_contours):
+
                 color = item['color']
+
                 contour = item['contour']
-       
-                # contour simplification: prune away points in line segments
-                simplified_points = self.simplify_points(contour).astype(np.float32)
 
-                # determine step size based on length of the path
-                length = cv2.arcLength(simplified_points, closed=True)
-                stepsize = 1
-                if (length > 500):
-                    stepsize = 8
-                elif (length > 300):
-                    stepsize = 7
-                elif (length > 200):
-                    stepsize = 5
-                elif (length > 100):
-                    stepsize = 4
-                elif (length > 50):
-                    stepsize = 3
-                elif (length > 20):
-                    stepsize = 2
-
-                # remove nearby points
-                simplified_points = self.remove_close_points(simplified_points, stepsize)   
-
-
-                # scale the pixels to millimeters 
-                scale_x = self.WIDTH_MM / WIDTH_PIXELS
-                scale_y = self.HEIGHT_MM / HEIGHT_PIXELS
-                scaled_points = simplified_points
-                scaled_points[:, 0] *= scale_x
-                scaled_points[:, 1] *= scale_y
-                points = scaled_points
+                points = contour.reshape(-1, 2)
 
                 # Contour heading
                 f1.write(f"Contour {i+1}\n")
@@ -482,7 +506,6 @@ class GcodeConverter:
                 prev_point = points[0]
 
                 # Marker down, draw the contour
-                #f2.write(f"{self.M_DOWN}\n")
                 for point in points[1:]:
                     f1.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
 
@@ -496,8 +519,6 @@ class GcodeConverter:
                     f2.write(f"G1 {dist:.2f}\n")
 
                     prev_point = point
-                   
-                #f.write(f"{self.M_UP}\n")
                 f2.write("\n")
                 f1.write("\n")
 
@@ -513,10 +534,8 @@ class GcodeConverter:
 
 
 def main():
-    converter = GcodeConverter()
-
+    converter = GcodeConverter(1500, 1500, 'digital')
     try:
- 
         image_path = f"{input_folder}/{src_file}" 
         output_file1, output_file2 = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file1}", f"{output_folder}/{gcode_file2}" )
         print(f"G-code saved to: {output_file1} and {output_file2}")

@@ -81,6 +81,7 @@ def process(image_type, width_mm, height_mm):
         
         # Save the uploaded file
         filename = secure_filename('myimage.png')
+        app.config['UPLOAD_FOLDER'] = 'backend/uploads'
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         

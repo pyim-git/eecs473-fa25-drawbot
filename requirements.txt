@@ -1,0 +1,22 @@
+# Auto-select Paddle variant by OS
+paddlepaddle-gpu==3.2.2; platform_system == "Windows"
+paddlepaddle; platform_system != "Windows"
+
+# Core libraries
+paddlex
+paddleocr
+opencv-contrib-python
+scipy
+matplotlib
+flask
+flask_cors
+
+# Notes:
+# On Windows, if GPU installation fails, install manually:
+# python -m pip install paddlepaddle-gpu==3.2.2 -i https://www.paddlepaddle.org.cn/packages/stable/cu129/
+
+
+# Other Installations:
+# Python <= 3.14 recommended
+# Node.js
+# Windows: C:\Users\shrutish\Downloads\node-v24.11.1-win-x64\npm.cmd [cmd]

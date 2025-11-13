@@ -123,9 +123,9 @@ def visualize_gcode(gcode_file_path, output_folder, output_file):
                 x_vals = [p[0] for p in points]
                 y_vals = [p[1] for p in points]
 
-                plt.plot(x_vals, y_vals, color, linewidth=2, alpha=0.7)
+                plt.plot(x_vals, y_vals, color, linewidth=1, alpha=0.7)
 
-               # plt.plot(x_vals, y_vals, 'ro', markersize=4, alpha=0.7)
+               # plt.plot(x_vals, y_vals, 'ro', markersize=2, alpha=0.7)
                 current_line += 1
                 points.clear()
 

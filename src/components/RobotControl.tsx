@@ -171,7 +171,7 @@ const stopCamera = () => {
 
     try {
       // Load the file from public/
-      const response = await fetch("backend/color_output/myimage.gcode");
+      const response = await fetch("backend/color_output/myimage1.gcode");
       const gcodeText = await response.text();
 
       // Split & filter
