@@ -80,8 +80,6 @@ def getColorMasks(image, drawing_colors):
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     
     color_masks = {}
-    color_areas = {}
-    result = np.ones_like(image)* 255
 
     # create color masks for every drawing color
     for color in drawing_colors:
@@ -104,10 +102,8 @@ def getColorMasks(image, drawing_colors):
         
         # get the detected pixel count for each color 
         color_masks[color] = mask
-        pixel_count = np.sum(mask == 255)
-        print(f"{color}: {pixel_count} pixels")
             
-    return color_masks, result
+    return color_masks
 
 
 
@@ -119,10 +115,10 @@ def assignColors(org_img, contours, isDigital):
     else:
         drawing_colors = photo_colors
 
-    color_masks, _= getColorMasks(org_img, drawing_colors)
+    color_masks = getColorMasks(org_img, drawing_colors)
     contour_colors = []
 
-    for i, contour in enumerate(contours):
+    for contour in contours:
         color = detectColor(org_img, contour, color_masks)
         if color == 'unknown':
             color = DEFAULT_COLOR
@@ -159,107 +155,4 @@ def detectColor(image, contour, color_masks, stroke_width =30):
     return best_color if best_color else 'unknown'
     
 
-                
-
-
-
-def splitContoursHorizontally(contour, color, split_y):
-    """split the drawing space into even rows given a specified row height
-        split_y = row height in mm
-    """
-    split_contours= []
-
-    if len(contour) == 0:
-        return []
-    
-    # if the bounding region of contour falls in the row, no need to split
-    x,y,w,h = cv2.boundingRect(contour)
-    if int(y // split_y) == int((y+h)// split_y):
-        split_contours.append({'color':color,
-                                'contour': contour})
-        return split_contours
-
-    # convert contour to points
-    points = contour.reshape(-1,2)
-
-    # add points to the current row
-    row_points = []
-    last_point = points[-1]
-
-
-    for i in range(len(points) - 1):
-        p1 = points[i]      # current point
-        p2 = points[i+1]    # next point
-        
-        # add current point to current row and check if next point is in a different row
-        row_points.append(p1)
-        
-        row_diff = abs(int(p2[1] // split_y) - int(p1[1] // split_y))
-        if (row_diff == 0):
-            continue
-        if (row_diff == 1 and (p2[1] % split_y ==0) and (p1[1] % split_y == 0)):
-            continue
-        
-
-        goDown = p2[1] > p1[1]
-
-        for j in range(row_diff):
-            if goDown: # points going down, horizontal cross section below p1
-                y_coord = (split_y * int(p1[1] // split_y)) + split_y
-            else: # points going up, horizontal cross section above p1
-                y_coord = (split_y* int(p2[1]//split_y)) + ((row_diff-j) * split_y)
-
-            # find the intersection point on the cross section: y = mx + b
-            if (abs(p2[0] - p1[0]) > .01):
-                slope = (p2[1] - p1[1]) / (p2[0] - p1[0])
-                b = p1[1] - (slope*p1[0])
-                x_coord = float((y_coord - b) / slope)
-            else: # vertical line
-                x_coord = p1[0]
-
-            # add intersection point to current row and append to the list of split contours
-            intersect = [x_coord,y_coord]
-            row_points.append(intersect)
-            split_contour = np.array(row_points, dtype=np.float32).reshape(-1, 1, 2)
-            split_contours.append({'color': color, 
-                                   'contour': split_contour})
-
-            # start the next row with intersection point    
-            row_points = [intersect]
-            p1 = intersect 
-         
-     
-    # add last point to current row and append it to the split_contours
-    row_points.append(last_point)
-    split_contour = np.array(row_points, dtype=np.float32).reshape(-1, 1, 2)
-    split_contours.append({'color': color,
-                           'contour': split_contour})
-  
-
-    return split_contours
-    
-
-        
-
-
-
-# def main():
-#     # try:
- 
-#     #     # image = cv2.imread("../data/colors.png")
-#     #     # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-#     #     # image = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel, iterations=1)
-
-
-#     #     # cv2.imshow('ALL DETECTED COLORS', result)
-#     #     # cv2.waitKey(0)
-#     #     # cv2.destroyAllWindows()
-
-
-#     # except Exception as e:
-#     #     print(f"Error with custom image: {e}")
-
-
-# if __name__ == "__main__":
-#     main()
-    
+            

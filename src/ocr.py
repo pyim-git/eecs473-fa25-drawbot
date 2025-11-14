@@ -12,23 +12,6 @@ ocr = PaddleOCR(
     use_textline_orientation=False) # text detection + text recognition
 
 
-# ocr = PaddleOCR(
-#     use_doc_orientation_classify=False, 
-#     use_textline_orientation=False)
-#     # det_db_box_thresh=0.5
-#     # rec_image_shape='3, 32, 320',        # Smaller = faster recognition
-#     # show_log=False,                      # Disable logging overhead
-#     # rec_batch_num=1) # text detection + text recognition
-# )
-#    # use_doc_orientation_classify=False,  # ✅ Keep disabled (slow)
-   # use_angle_cls=False,                 # ⚡ DISABLE - major speed boost
-#     lang='en',
-#     use_textline_orientation=False,      # ✅ Keep disabled (slow)
-#     det_db_thresh=0.4,                   # Higher threshold = fewer detections
-#     det_db_box_thresh=0.5,
-#     rec_image_shape='3, 32, 320',        # Smaller = faster recognition
-#    # show_log=False,                      # Disable logging overhead
-#     rec_batch_num=1                     # Process one at a time
 
 contour_lib = ContourLibrary()
 
@@ -102,8 +85,4 @@ def transpose_print_text_to_image(detected_words, image_path):
         image = cv2.add(image_bg, region)
 
     return image
-
-# # words = detect_text("color_img/mytest.png")
-# # transpose_print_text_to_image(words, "color_img/mytest.png")
-# # remove_contours_in_text_boxes_bbox([], words)
 

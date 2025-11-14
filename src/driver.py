@@ -14,7 +14,7 @@ from ocr import *
 # Setup directories
 input_folder = "../color_img"
 output_folder = "../color_output"
-src_file = "notes.png"
+src_file = "font.png"
 gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"
 gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
@@ -92,6 +92,8 @@ class GcodeConverter:
         # # Connect small gaps to get smoother shapes
         # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
         # cleaned = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+        # create gaps between pixels to get whitespace for images with heavy text
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
         cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel, iterations=1)
         
@@ -100,8 +102,7 @@ class GcodeConverter:
         return skeleton, cleaned, org_img
 
 
-    def findShapes(self, binary, skeleton_contours, result, 
-    thresholdClosed = 0.3, shape_similarity_threshold=0.15, size_diff = 0.03):
+    def findShapes(self, binary, skeleton_contours, shape_similarity_threshold=0.15, size_diff = 0.03):
         """fix the skeletonized shapes with perfect shapes"""
 
         # Detect unskeletonized contours using RETR_TREE to detect nested contours
@@ -149,12 +150,12 @@ class GcodeConverter:
                     pixel_distance = np.linalg.norm(centroid1 - centroid2)
 
                     if (pixel_distance < adaptive_threshold):
-                        self.replaceShapes(result,outer_contour, inner_contour, skeletons)       
+                        self.replaceShapes(outer_contour, inner_contour, skeletons)       
                                  
         return skeletons
 
 
-    def replaceShapes(self, result, outerContour, innerContour, skeletons, thresholdClosed = 0.3):
+    def replaceShapes(self, outerContour, innerContour, skeletons):
         # loop through all the skeleton contours to find one enclosed between inner and outer contour
         outer_x,outer_y, outer_w, outer_h = cv2.boundingRect(outerContour)
         inner_x, inner_y, inner_w, inner_h = cv2.boundingRect(innerContour)
@@ -324,6 +325,8 @@ class GcodeConverter:
 
 
     def simplify_points(self, contour, threshold_Closed = 0.3):
+        """ prune away points in path
+        threshold_Closed determines if a path is a closed path"""
         points = contour.reshape(-1, 2) 
 
         # check if the contour is closed or open path. 
@@ -412,6 +415,81 @@ class GcodeConverter:
 
         
     
+    def splitContoursHorizontally(self, contour, color, split_y):
+        """split the drawing space into even rows given a specified row height
+            split_y = row height in mm
+        """
+        split_contours= []
+
+        if len(contour) == 0:
+            return []
+        
+        # if the bounding region of contour falls in the row, no need to split
+        x,y,w,h = cv2.boundingRect(contour)
+        if int(y // split_y) == int((y+h)// split_y):
+            split_contours.append({'color':color,
+                                    'contour': contour})
+            return split_contours
+
+        # convert contour to points
+        points = contour.reshape(-1,2)
+
+        # add points to the current row
+        row_points = []
+        last_point = points[-1]
+
+
+        for i in range(len(points) - 1):
+            p1 = points[i]      # current point
+            p2 = points[i+1]    # next point
+            
+            # add current point to current row and check if next point is in a different row
+            row_points.append(p1)
+            
+            row_diff = abs(int(p2[1] // split_y) - int(p1[1] // split_y))
+            if (row_diff == 0):
+                continue
+            if (row_diff == 1 and (p2[1] % split_y ==0) and (p1[1] % split_y == 0)):
+                continue
+            
+
+            goDown = p2[1] > p1[1]
+
+            for j in range(row_diff):
+                if goDown: # points going down, horizontal cross section below p1
+                    y_coord = (split_y * int(p1[1] // split_y)) + split_y
+                else: # points going up, horizontal cross section above p1
+                    y_coord = (split_y* int(p2[1]//split_y)) + ((row_diff-j) * split_y)
+
+                # find the intersection point on the cross section: y = mx + b
+                if (abs(p2[0] - p1[0]) > .01):
+                    slope = (p2[1] - p1[1]) / (p2[0] - p1[0])
+                    b = p1[1] - (slope*p1[0])
+                    x_coord = float((y_coord - b) / slope)
+                else: # vertical line
+                    x_coord = p1[0]
+
+                # add intersection point to current row and append to the list of split contours
+                intersect = [x_coord,y_coord]
+                row_points.append(intersect)
+                split_contour = np.array(row_points, dtype=np.float32).reshape(-1, 1, 2)
+                split_contours.append({'color': color, 
+                                    'contour': split_contour})
+
+                # start the next row with intersection point    
+                row_points = [intersect]
+                p1 = intersect 
+            
+        
+        # add last point to current row and append it to the split_contours
+        row_points.append(last_point)
+        split_contour = np.array(row_points, dtype=np.float32).reshape(-1, 1, 2)
+        split_contours.append({'color': color,
+                            'contour': split_contour})
+
+        return split_contours
+    
+        
      
     def image_to_gcode(self, image_path, output_file1, output_file2):
         """write gcode to output file"""
@@ -432,11 +510,11 @@ class GcodeConverter:
 
         # Find contours using RETR_TREE (detects nested contours)
         skeleton_contours, _ = cv2.findContours(skeleton_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
-        height, width = org_img.shape[:2]
-        result = np.zeros((height, width, 3), dtype=np.uint8)
+        # height, width = org_img.shape[:2]
+        # result = np.zeros((height, width, 3), dtype=np.uint8)
     
         # detect skeletonized closed shapes and convert them to perfect shapes
-        skeleton_contours = self.findShapes(binary, skeleton_contours, result)
+        skeleton_contours = self.findShapes(binary, skeleton_contours)
 
         # filter out small contours
         contours = self.filters_contours(skeleton_contours, skeleton_img)
@@ -458,14 +536,12 @@ class GcodeConverter:
             # scale the pixels to millimeters 
             scale_x = WIDTH_MM / WIDTH_PIXELS
             scale_y = HEIGHT_MM / HEIGHT_PIXELS
-            scaled_points = points
-            scaled_points[:, 0] *= scale_x
-            scaled_points[:, 1] *= scale_y
-            points = scaled_points
+            points[:, 0] *= scale_x
+            points[:, 1] *= scale_y
 
             # split contour into horizontal sections
             contour = np.array(points, dtype=np.float32).reshape(-1, 1, 2)
-            split_contours.extend(splitContoursHorizontally(contour, color, RowHeight))
+            split_contours.extend(self.splitContoursHorizontally(contour, color, RowHeight))
 
         # loop through all paths and find ones that retraces itself
         for i in range(len(split_contours)):
@@ -502,8 +578,7 @@ class GcodeConverter:
                 color = item['color']
                 contour = item['contour']
                 points = contour.reshape(-1, 2)
-
-                
+   
                 # Contour heading
                 f1.write(f"Contour {i+1}\n")
                 f1.write(f"Color {color}\n")
@@ -557,11 +632,10 @@ def main():
     converter = GcodeConverter()
 
     try:
- 
         image_path = f"{input_folder}/{src_file}" 
         output_file1, _ = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file1}", f"{output_folder}/{gcode_file2}" )
         print(f"G-code saved to: {output_file1}") 
-        visualize_gcode(output_file1, f"{output_folder}", gcode_plotfile)
+        visualize_gcode(output_file1, f"{output_folder}", gcode_plotfile, WIDTH_MM, HEIGHT_MM)
 
     except Exception as e:
         print(f"Error with custom image: {e}")
