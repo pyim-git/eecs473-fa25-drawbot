@@ -40,47 +40,59 @@ export function RobotControl() {
   const [cameraError, setCameraError] = useState<string | null> (null);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const videoref = useRef<HTMLVideoElement | null>(null);
+  const videoref = useRef<HTMLImageElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
   const hardcodedImage = "backend/color_output/myimage.png"; // ← put your image in /public/images/myimage.png
+
+  // Set video source when camera is enabled and image element is available
+  useEffect(() => {
+    if (isCameraEnabled && videoref.current) {
+      console.log("Setting image source to backend MJPEG stream");
+      videoref.current.src = "http://localhost:500/video_feed";
+      toast.success("Robot detection camera started");
+      // Add timestamp to prevent caching
+      const videoUrl = `http://localhost:500/video_feed?t=${Date.now()}`;
+      videoref.current.src = videoUrl;
+      console.log("Video URL set to:", videoUrl);
+      // Handle errors
+      videoref.current.onerror = (e) => {
+        console.error("Error loading video stream:", e);
+        const errorMsg = "Failed to load video stream. Make sure the backend server is running at http://localhost:500";
+        setCameraError(errorMsg);
+        toast.error(errorMsg);
+        setIsCameraEnabled(false);
+      };
+      
+      // Handle successful load
+      videoref.current.onload = () => {
+        console.log("Video stream loaded successfully");
+        toast.success("Robot detection camera started");
+      };
+    }
+  }, [isCameraEnabled]);
 
   //clean up websocket and camera on unmount
   useEffect(() => {
     return () => {
       if (wsRef.current) {
-        wsRef.curent.close();
-    }
-    stopCamera();
-  };
-}, []);
+        wsRef.current.close();
+      }
+      stopCamera();
+    };
+  }, []);
 
 const startCamera = async () => {
   console.log("startCamera called");
   try {
     setCameraError(null);
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: {ideal: 1280},
-        height: {ideal: 720},
-        facingMode: "user"
-      },
-      audio: false
-    });
-    console.log("VideoRef:", videoref.current);
-
-    if (videoref.current) {
-      videoref.current.srcObject = stream;
-      streamRef.current = stream;
-      setIsCameraEnabled(true);
-      console.log("Camera: ", isCameraEnabled)
-      toast.success("Camera started");
-    }
+    setIsCameraEnabled(true);
   } catch (error) {
     console.error("Camera error:", error);
     const errorMessage = error instanceof Error ? error.message: "Failed to access camera";
     setCameraError(errorMessage);
     toast.error("Failed to access camera");
+    setIsCameraEnabled(false);
   }
 };
 
@@ -91,6 +103,9 @@ const stopCamera = () => {
   }
   if (videoref.current) {
     videoref.current.srcObject = null;
+    // Clear the image source for MJPEG stream
+    videoref.current.src = "";
+    videoref.current.onerror = null;
   }
   setIsCameraEnabled(false);
   setCameraError(null);
@@ -191,11 +206,6 @@ const stopCamera = () => {
         await new Promise(resolve => setTimeout(resolve, 10));
       }
       wsRef.current.send("GCODE_END");
-      // // Send each line over WebSocket
-      // for (const line of gcodeLines) {
-      //   wsRef.current.send(line+'\n');
-      //   await new Promise(resolve => setTimeout(resolve, 10));
-      // }
 
       toast.success(`Sent ${contours.length} contours`);
     } catch (err) {
@@ -237,16 +247,15 @@ const stopCamera = () => {
               </CardHeader>
               <CardContent>
                 <div className="relative w-full bg-black rounded-lg overflow-hidden" style={{ aspectRatio: '16/9' }}>
-                  <video
+                  <img
                     ref={videoref}
-                    autoPlay
-                    playsInline
-                    muted
                     className="w-full h-full object-contain"
+                    alt="Robot camera feed with ArUco detection"
+                    style={{ display: 'block' }}
                   />
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Live video feed from your camera. Future updates will include image processing capabilities.
+                  Live video feed with ArUco marker detection from robot camera.
                 </p>
               </CardContent>
             </Card>

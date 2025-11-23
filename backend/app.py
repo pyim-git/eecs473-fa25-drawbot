@@ -13,11 +13,12 @@ Setup:
 The web app will send images to this endpoint for processing.
 """
 
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 import os
 from werkzeug.utils import secure_filename
 from driver import *
+from robot_detection import generate_frames
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for browser requests
@@ -100,6 +101,17 @@ def process(image_type, width_mm, height_mm):
 def health():
     """Health check endpoint"""
     return jsonify({'status': 'ok', 'message': 'Local API server is running'}), 200
+
+@app.route('/video_feed')
+def video_feed():
+    """
+    Video streaming route that streams processed video frames with ArUco detection.
+    Returns MJPEG stream that can be used in an HTML img tag or video element.
+    """
+    return Response(
+        generate_frames(),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
 
 if __name__ == '__main__':
     print('=' * 60)
