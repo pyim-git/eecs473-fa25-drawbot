@@ -106,7 +106,7 @@ void GANTRY::moveLeft(double distance, double speed) {
 } // ..moveLeft()
 
 // move gripper fully to the left side of the gantry
-void resetPos() {
+void GANTRY::resetPos() {
   // reset gantry position to left side
   moveLeft(100, 50);
   delay(waitTime);

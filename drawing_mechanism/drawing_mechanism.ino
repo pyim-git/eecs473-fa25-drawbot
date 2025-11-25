@@ -12,9 +12,5 @@ void setup() {
 }
 
 void loop() {
-    // draw a straight line to the right by 100 mm
-    delay(1000);
-    drawing.takeMarkerFrom();
-    delay(1000);
-    drawing.putMarkerBack();
+  // TESTING LOOP FOR STUFF YAY
 }
