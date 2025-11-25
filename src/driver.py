@@ -14,10 +14,12 @@ from ocr import *
 # Setup directories
 input_folder = "../color_img"
 output_folder = "../color_output"
-src_file = "font.png"
+src_file = "shapes.png"
 gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"
 gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
+
+# TODO: path for motors: get the bounding region and count the number of round trips 
 
 
 if not os.path.exists(output_folder):
@@ -193,7 +195,7 @@ class GcodeConverter:
             
             # Calculate which row this contour belongs to
             row_number = y // row_height
-
+           
             # sort points left to right in even rows
             if (row_number % 2 ==0):
                 if (contour[0][0][0] > contour[-1][0][0]):
@@ -489,8 +491,8 @@ class GcodeConverter:
 
         return split_contours
     
-        
-     
+
+
     def image_to_gcode(self, image_path, output_file1, output_file2):
         """write gcode to output file"""
         # detected_words = detect_text(image_path)
@@ -570,48 +572,82 @@ class GcodeConverter:
         sorted_contours = self.sort_split_contours(split_contours, RowHeight)
 
 
-        # Open file for writing: file1 for absolute positions, file2 for relative offsets
+        # Open file for writing: file1 for absolute positions, file2 for gear motor commands
         with open(output_file1, 'w') as f1, open(output_file2, 'w') as f2:
             print(f"Found {len(sorted_contours)} contours")
+
+            current_row = 0 # initial conditions
+            LtoR = True
+            prev_point = np.array([0,0])
+
+            current_color = sorted_contours[0]['color']
+            f2.write(f"Color {current_color}\n")
 
             for i, item in enumerate(sorted_contours):
                 color = item['color']
                 contour = item['contour']
                 points = contour.reshape(-1, 2)
    
+                # find which row the contour belongs to
+                _, y, _, _ = cv2.boundingRect(contour)
+                row = y // RowHeight    # 0 indexed rows
+
+                if row != current_row:
+                    # tell gear motor to move to next row's first point
+                    f2.write(f"D{row - current_row}\n")          # GO DOWN by # of rows
+                    current_row = row
+                    LtoR = True if row % 2 == 0 else False # resets direction at the start of a new row
+                else:
+                    if LtoR:
+                        if points[0][0] - prev_point[0] <= 0:
+                            LtoR = False  
+                    else: 
+                        if (points[0][0]- prev_point[0]) >= 0:
+                            LtoR = True
+                
+                
                 # Contour heading
                 f1.write(f"Contour {i+1}\n")
                 f1.write(f"Color {color}\n")
 
                 f2.write(f"Contour {i+1}\n")
-                f2.write(f"Color {color}\n")
+              #  f2.write(f"Color {color}\n")
+                if (i!=0 and color != current_color):
+                    f2.write(f"Color {current_color}\n")
+                    current_color = color
 
                 # Move to first point (marker up)
                 f1.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
+                f2.write(f"X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
 
-                # get the angle and relative offset to first point from origin
-                dist = math.sqrt(points[0][0]**2 + points[0][1]**2)
-                angle_rad = math.atan2(points[0][1],points[0][0])
-
-                f2.write(f"A {angle_rad:.3f}\n")
-                f2.write(f"G0 {dist:.2f}\n")
 
                 prev_point = points[0]
 
                 # Marker down, draw the contour
-                for point in points[1:]:
+                for point in points[1:-1]:
                     f1.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
 
-                    # get the angle and relative offset between last and next point
-                    dx = point[0] - prev_point[0]
-                    dy = point[1] - prev_point[1]
-                    angle_rad = math.atan2(dy, dx)
-                    dist = math.sqrt(dx**2 + dy**2)  
-
-                    f2.write(f"A {angle_rad:.3f}\n")
-                    f2.write(f"G1 {dist:.2f}\n")
+                    # check if from current point to next point is in the same direction as the current direction
+                    if LtoR:
+                        if point[0] - prev_point[0] <= 0:
+                            LtoR = False  # backpass, add to gear motor command
+                            if not np.array_equal(prev_point, points[0]):
+                                f2.write(f"X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
+                        # else: keep traversing through the points
+                    else: 
+                        if (point[0]-prev_point[0]) >= 0:
+                            LtoR = True
+                           # f2.write("changing to L->R\n")
+                            if not np.array_equal(prev_point, points[0]):
+                                f2.write(f"X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
 
                     prev_point = point
+                
+                # add last point
+                f1.write(f"G1 X{points[-1][0]:.2f} Y{points[-1][1]:.2f}\n")
+                f2.write(f"X{points[-1][0]:.2f} Y{points[-1][1]:.2f}\n")
+                prev_point = points[-1]
+
                    
                 f2.write("\n")
                 f1.write("\n")
@@ -635,7 +671,7 @@ def main():
         image_path = f"{input_folder}/{src_file}" 
         output_file1, _ = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file1}", f"{output_folder}/{gcode_file2}" )
         print(f"G-code saved to: {output_file1}") 
-        visualize_gcode(output_file1, f"{output_folder}", gcode_plotfile, WIDTH_MM, HEIGHT_MM)
+        #visualize_gcode(output_file1, f"{output_folder}", gcode_plotfile, WIDTH_MM, HEIGHT_MM)
 
     except Exception as e:
         print(f"Error with custom image: {e}")
