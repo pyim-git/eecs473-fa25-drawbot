@@ -37,7 +37,7 @@ void GANTRY::init() {
   */
 
   // initialize servos and steppers to initial positions
-  moveLeft(100, 50);
+  resetPos();
   markerUp();  // reset marker to up position (not touching board)
   grab();     // tighten grippers
   tool_change.write(50);   // reset position of tool change rack
@@ -67,6 +67,9 @@ void GANTRY::moveRight(double distance, double speed) {
   // put gantry to sleep - only allowed if sleep pin set
   // gantry.sleep();
 
+  // add a little bit of delay to separate commands
+  delay(waitTime);
+
   // regrip marker (could've gotten loose)
   grab();
 } // ..moveRight()
@@ -95,42 +98,68 @@ void GANTRY::moveLeft(double distance, double speed) {
   // put gantry to sleep - only allowed if sleep pin set
   // gantry.sleep();
   
+  // add a little bit of delay to separate commands
+  delay(waitTime);
+
   // regrip marker (could've gotten loose)
   grab();
 } // ..moveLeft()
+
+// move gripper fully to the left side of the gantry
+void resetPos() {
+  // reset gantry position to left side
+  moveLeft(100, 50);
+  delay(waitTime);
+}
 
 // *** MARKER COMMANDS ***
 // grab marker - change angle as needed
 void GANTRY::grab() {
   // tighten gripper for servo
   gripper.write(180);
+  delay(waitTime);
 } // ..grab()
 
 // release marker - change angle as needed
 void GANTRY::release() {
   // loosen gripper for servo
   gripper.write(60);
+  delay(waitTime);
 }
 
-// move marker up - hasn't been tested yet
+// move marker up
 void GANTRY::markerUp() {
   // move marker up off whiteboard
   z_axis.write(70);
+  // add a little bit of delay to separate commands
+  delay(waitTime);
 
   // regrip marker (could've gotten loose
   grab();
 } // ..markerUp
 
-// move marker down - hasn't been tested yet
+// move marker down
 void GANTRY::markerDown() {
   // move marker down onto whiteboard
   z_axis.write(0);
+  // add a little bit of delay to separate commands
+  delay(waitTime);
 
   // regrip marker (could've gotten loose
   grab();
 } // ..markerDown
 
-void GANTRY::putMarkerBack() {
+// puts marker back into tool changing rack
+// specify postion to put it back into
+void GANTRY::putMarkerBack(int position) {
+  // reset gantry position
+  resetPos();
+
+  // move gripper to position you want
+  // CHANGE THIS WHEN TESTING TO GET BEST POSITION
+  if (position == 2) { moveRight(50, 50); }
+  else if (position == 3) { moveRight(100, 50); }
+
   // marker currently in gripper
   // have tool rack grab marker
   tool_change.write(0);
@@ -145,7 +174,17 @@ void GANTRY::putMarkerBack() {
   delay(200);
 } // placeMarker()
 
-void GANTRY::takeMarkerFrom() {
+// takes marker out of tool changing rack
+// specify postion to take it out of
+void GANTRY::takeMarkerFrom(int position) {
+  // reset gantry position
+  resetPos();
+
+  // move gripper to position you want
+  // CHANGE THIS WHEN TESTING TO GET BEST POSITION
+  if (position == 2) { moveRight(50, 50); }
+  else if (position == 3) { moveRight(100, 50); }
+
   // marker currently not in gripper
   // have tool rack give gripper a marker
   tool_change.write(0);

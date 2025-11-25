@@ -14,6 +14,7 @@ class GANTRY {
     int tot_num_steps = 200;
     double step_dist = 2*PI*radius / 200;
     int wait = 1;
+    int waitTime = 100;   // delay time between commands - CHANGE AS NEEDED
 
     DRV8825 gantry;     // STEPPER MOTOR FOR GANTRY
     Servo z_axis;       // servo for z axis movement (underneath gripper)
@@ -37,6 +38,9 @@ class GANTRY {
     // function takes in a distance in mm and speed in mm/s
     void moveLeft(double distance, double speed);
 
+    // move gantry fully to the left and reset its position
+    void resetPos();
+
     // *** MARKER COMMANDS ***
     // grab marker - change angle as needed
     void grab();
@@ -53,11 +57,11 @@ class GANTRY {
     // put marker back into rack
     // MUST CALL MOVE GANTRY TO POSITION BEFORE CALLING THIS
     // NEED TO CHANGE TO AUTOMATE THIS
-    void putMarkerBack();
+    void putMarkerBack(int position);
 
     // switch out marker with one in the tool rack
     // MUST CALL MOVE GANTRY TO POSITION BEFORE CALLING THIS
     // NEED TO CHANGE TO AUTOMATE THIS
-    void takeMarkerFrom();
+    void takeMarkerFrom(int position);
 };
 // -- END OF FILE --
