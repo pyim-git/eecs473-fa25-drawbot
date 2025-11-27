@@ -12,14 +12,13 @@ from ocr import *
 
 
 # Setup directories
-input_folder = "../data"
-output_folder = "../output"
-src_file = "pi.png"
+input_folder = "../color_img"
+output_folder = "../color_output"
+src_file = "shapes.png"
 gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"
 gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
-# TODO: path for motors: get the bounding region and count the number of round trips 
 
 
 if not os.path.exists(output_folder):
@@ -38,7 +37,7 @@ HEIGHT_PIXELS = 2000
 # user defines whether input image is digital or photo
 isDigital = True
 
-RowHeight = 400 # in mm
+RowHeight = 100 # in mm
 
 
 
@@ -244,11 +243,8 @@ class GcodeConverter:
                     if (abs(contour[-1][0][0] - prev_x) <  abs(contour[0][0][0] - prev_x)):
                         # trace the path in reverse order if endpoint is closer to previous endpoint than path's start point 
                         row_contours[i]['contour'] = contour[::-1]
-                        print(f"reverse contour{i}, prev_x becomes {contour[0][0][0]}")
                         prev_x = contour[0][0][0]
-
                     else:
-                        print(f"forward contour {i}")
                         prev_x = contour[-1][0][0] # update endpoint
 
                 prevRow_x = prev_x
@@ -537,7 +533,7 @@ class GcodeConverter:
                 for j in range(half):
                     x_dist = abs(points[j][0] - points[n-1-j][0])
                     y_dist = abs(points[j][1] - points[n-1-j][1])
-                    if (x_dist > 4 or y_dist > 4): # guessing expo marker resolution
+                    if (x_dist > 3 or y_dist > 3): # guessing expo marker resolution
                         break
                 if j>2:  # only removes if detected more than 1 duplicate
                     points = points[:(n-j)]
@@ -604,14 +600,12 @@ class GcodeConverter:
 
         # Open file for writing: file1 for absolute positions, file2 for gear motor commands
         with open(output_file1, 'w') as f1, open(output_file2, 'w') as f2:
-            print(f"Found {len(sorted_contours)} contours")
-
-            current_row = 0 # initial conditions
+            # initial conditions
+            current_row = 0 
             LtoR = True
             prev_point = np.array([0,0])
+            current_color = None
 
-            current_color = sorted_contours[0]['color']
-           # f2.write(f"Color {current_color}\n")
 
             for i, item in enumerate(sorted_contours):
                 color = item['color']
@@ -624,32 +618,26 @@ class GcodeConverter:
 
                 if row != current_row:
                     # tell gear motor to move to next row's first point
-                    f2.write(f"D{row - current_row}\n")          # GO DOWN by # of rows
-                    current_row = row
+                    f2.write(f"D{row - current_row}\n")    # GO DOWN by # of rows
                     LtoR = (row_directions[row] == 'LtoR') # resets direction at the start of new row
+                    current_row = row
                 else:
-                    if LtoR:
-                        if points[0][0] - prev_point[0] <= 0:
+                    if LtoR: # change direction at every backpass
+                        if points[0][0] - prev_point[0] < 0:
                             LtoR = False  
                     else: 
-                        if (points[0][0]- prev_point[0]) >= 0:
+                        if (points[0][0]- prev_point[0]) > 0:
                             LtoR = True
-                
-                
-                # Contour heading
-                f1.write(f"Contour {i+1}\n")
-                f1.write(f"Color {color}\n")
-
-                f2.write(f"Contour {i+1}\n")
-                if (i!=0 and color != current_color):
-                    # sends color command everytime color changes
-                    f2.write(f"Color {current_color}\n")
-                    current_color = color
 
                 # Move to first point (marker up)
                 f1.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
                 f2.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
 
+                # sends color command if color changes
+                if (current_color != color):
+                    f1.write(f"Color {color}\n")
+                    f2.write(f"Color {color}\n")
+                    current_color = color
 
                 prev_point = points[0]
 
@@ -659,7 +647,8 @@ class GcodeConverter:
 
                     # check if from current point to next point is in the same direction as the current direction
                     if abs(point[0] -prev_point[0]) < 0.01:
-                        f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
+                        if not np.array_equal(prev_point, points[0]):
+                            f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
                     else:
                         if LtoR:
                             if point[0] - prev_point[0] < 0:
@@ -670,7 +659,6 @@ class GcodeConverter:
                         else: 
                             if (point[0]-prev_point[0]) > 0:
                                 LtoR = True
-                            # f2.write("changing to L->R\n")
                                 if not np.array_equal(prev_point, points[0]):
                                     f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
 
@@ -679,8 +667,7 @@ class GcodeConverter:
                 # add last point
                 f2.write(f"G1 X{points[-1][0]:.2f} Y{points[-1][1]:.2f}\n")
                 prev_point = points[-1]
-
-                   
+        
                 f2.write("\n")
                 f1.write("\n")
 
