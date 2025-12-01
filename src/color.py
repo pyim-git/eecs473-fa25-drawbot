@@ -46,34 +46,6 @@ hsv_ranges = {
 }
 
 
-digital_colors = [
-    'black',
-    'blue',
-    'red',
-    'green',
-    'purple',
-    'orange',
-    'brown',
-    'yellow',
-    'gray'
-]
-
-# no gray
-photo_colors = [
-    'black',
-    'blue',
-    'red',
-    'green',
-    'purple',
-    'orange',
-    'brown',
-    'yellow',
-]
-
-# user configurable default color for undetected colors
-DEFAULT_COLOR = 'pink' 
-
-
 
 def getColorMasks(image, drawing_colors):
     """Create masks showing where each color appears in the entire image"""
@@ -107,13 +79,9 @@ def getColorMasks(image, drawing_colors):
 
 
 
-def assignColors(org_img, contours, isDigital):
+def assignColors(org_img, contours, drawing_colors, default_color):
     """Loop through contours and assign colors"""
 
-    if isDigital:
-        drawing_colors = digital_colors
-    else:
-        drawing_colors = photo_colors
 
     color_masks = getColorMasks(org_img, drawing_colors)
     contour_colors = []
@@ -121,9 +89,9 @@ def assignColors(org_img, contours, isDigital):
     for contour in contours:
         color = detectColor(org_img, contour, color_masks)
         if color == 'unknown':
-            color = DEFAULT_COLOR
+            color = default_color
         contour_colors.append({ 
-            'color': color,
+            'color': drawing_colors[color],
             'contour': contour
         })
    
@@ -156,3 +124,5 @@ def detectColor(image, contour, color_masks, stroke_width =30):
     
 
             
+
+

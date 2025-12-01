@@ -12,11 +12,11 @@ from ocr import *
 
 
 # Setup directories
-input_folder = "../data"
-output_folder = "../output"
-src_file = "pi.png"
-gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"
-gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"
+input_folder = "../color_img"
+output_folder = "../color_output"
+src_file = "test1.png"
+gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"    # stepper motor commands
+gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"    # gear motor commands
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
 
@@ -24,36 +24,68 @@ gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
-# user-configurable drawing dimension in mm
+# user configurable drawing dimensions in mm
 WIDTH_MM = 1000
 HEIGHT_MM = 1000
 
-
-
-# default pixel dimensions set for clean image processing
-WIDTH_PIXELS = 2000
-HEIGHT_PIXELS = 2000
-
-# user defines whether input image is digital or photo
-isDigital = True
-
-RowHeight = 100 # in mm
-
+# user configurable color selects
+black_select = 'black'
+blue_select = 'blue'
+red_select = 'red'
+green_select = 'green'
+purple_select = 'purple'
+orange_select = 'orange'
+brown_select = 'brown'
+yellow_select = 'yellow'
 
 
 class GcodeConverter:
     def __init__(self):
         self.POSITION = "G0" # robot positioning to starting point (fastest speed)
         self.TRACE = "G1"    # robot tracing a path to next point (slower speed)
+        self.RowHeight = 100    # in mm
+
+        self.WIDTH_PIXELS = 2000
+        self.HEIGHT_PIXELS = 2000   
+
+        # user configurable parameters
+        self.isDigital = True       # true if input image is digital, else False is photo
+        self.WIDTH_MM = WIDTH_MM    
+        self.HEIGHT_MM = HEIGHT_MM
+        self.DEFAULT_COLOR = 'pink' # default color for undefined colors
+
+        self.digital_colors = {
+            'black': black_select,
+            'blue': blue_select,
+            'red': red_select,
+            'green': green_select,
+            'purple': purple_select,
+            'orange': orange_select,
+            'brown': brown_select,
+            'yellow': yellow_select,
+            'gray': black_select
+        }
+        self.photo_colors = {
+            'black': black_select,
+            'blue': blue_select,
+            'red': red_select,
+            'green': green_select,
+            'purple': purple_select,
+            'orange': orange_select,
+            'brown': brown_select,
+            'yellow': yellow_select
+        }
+        
+
+
    
-    
     def preprocess_photo(self, image_path):
         """resize, clean, and skeletonize the image"""
         org_img = cv2.imread(image_path)
         if org_img is None:
             raise ValueError(f"Could not load image from {image_path}")
 
-        org_img = cv2.resize(org_img, (WIDTH_PIXELS, HEIGHT_PIXELS))
+        org_img = cv2.resize(org_img, (self.WIDTH_PIXELS, self.HEIGHT_PIXELS))
         hsv_img = cv2.cvtColor(org_img, cv2.COLOR_BGR2HSV)
         gray = cv2.cvtColor(hsv_img, cv2.COLOR_BGR2GRAY)
 
@@ -84,7 +116,7 @@ class GcodeConverter:
         if org_img is None:
             raise ValueError(f"Could not load image from {image_path}")
 
-        org_img = cv2.resize(org_img, (WIDTH_PIXELS, HEIGHT_PIXELS))
+        org_img = cv2.resize(org_img, (self.WIDTH_PIXELS, self.HEIGHT_PIXELS))
 
         # convert image to binary
         gray = cv2.cvtColor(org_img, cv2.COLOR_BGR2GRAY)
@@ -189,10 +221,10 @@ class GcodeConverter:
             row height = gantry length"""
         
         # store list of contours for each row
-        contours_data = [[] for _ in range(math.ceil(HEIGHT_MM/RowHeight))] 
+        contours_data = [[] for _ in range(math.ceil(self.HEIGHT_MM/self.RowHeight))] 
 
         # stores the leftmost and rightmost x coordinate for each row
-        row_bounds = [(None, None) for _ in range(math.ceil(HEIGHT_MM/RowHeight))]
+        row_bounds = [(None, None) for _ in range(math.ceil(self.HEIGHT_MM/self.RowHeight))]
 
         # get row information and bounds for each row
         for contour_data in contours:
@@ -200,7 +232,7 @@ class GcodeConverter:
             x, y, w, h = cv2.boundingRect(contour)
             
             # Calculate which row this contour belongs to
-            row_num = y // RowHeight 
+            row_num = y // self.RowHeight 
             left = min(contour[0][0][0], contour[-1][0][0])
             right = max(contour[0][0][0], contour[-1][0][0])
             contours_data[row_num].append({
@@ -304,7 +336,7 @@ class GcodeConverter:
 
 
 
-    def is_bbox_duplicate(self, contourA, contourB, shape_threshold = 0.3, close_threshold= 3):
+    def is_bbox_duplicate(self, contourA, contourB,  close_threshold= 3):
         """Check for contour duplicates by comparing their bounding boxes"""
  
         px, py, pw, ph = cv2.boundingRect(contourA)
@@ -432,8 +464,8 @@ class GcodeConverter:
                 roi = skeleton_img[y:y+w, x:x+h]
                 contour_pixels = cv2.countNonZero(roi)
 
-                region_y = max(y+w+12, HEIGHT_PIXELS)
-                region_x = max(x+h+12, WIDTH_PIXELS)
+                region_y = max(y+w+12, self.HEIGHT_PIXELS)
+                region_x = max(x+h+12, self.WIDTH_PIXELS)
                 roi = skeleton_img[y:region_y, x:region_x]
                 region_pixels = cv2.countNonZero(roi)
 
@@ -455,7 +487,7 @@ class GcodeConverter:
         
         # if the bounding region of contour falls in the row, no need to split
         x,y,w,h = cv2.boundingRect(contour)
-        if int(y // RowHeight) == int((y+h)// RowHeight):
+        if int(y // self.RowHeight) == int((y+h)// self.RowHeight):
             split_contours.append({'color': color,
                                     'contour': contour})
             return split_contours
@@ -475,10 +507,10 @@ class GcodeConverter:
             # add current point to current row and check if next point is in a different row
             row_points.append(p1)
             
-            row_diff = abs(int(p2[1] // RowHeight) - int(p1[1] // RowHeight))
+            row_diff = abs(int(p2[1] // self.RowHeight) - int(p1[1] // self.RowHeight))
             if (row_diff == 0):
                 continue
-            if (row_diff == 1 and (p2[1] % RowHeight ==0) and (p1[1] % RowHeight == 0)):
+            if (row_diff == 1 and (p2[1] % self.RowHeight ==0) and (p1[1] % self.RowHeight == 0)):
                 continue
             
 
@@ -486,9 +518,9 @@ class GcodeConverter:
 
             for j in range(row_diff):
                 if goDown: # points going down, horizontal cross section below p1
-                    y_coord = (RowHeight * int(p1[1] // RowHeight)) + RowHeight
+                    y_coord = (self.RowHeight * int(p1[1] // self.RowHeight)) + self.RowHeight
                 else: # points going up, horizontal cross section above p1
-                    y_coord = (RowHeight* int(p2[1]//RowHeight)) + ((row_diff-j) * RowHeight)
+                    y_coord = (self.RowHeight* int(p2[1]//self.RowHeight)) + ((row_diff-j) * self.RowHeight)
 
                 # find the intersection point on the cross section: y = mx + b
                 if (abs(p2[0] - p1[0]) > .01):
@@ -551,7 +583,7 @@ class GcodeConverter:
       #  image_text_path = image_path
 
         # process the image and get a binary, skeletonized image
-        if isDigital:
+        if self.isDigital:
             skeleton_img, binary, org_img= self.preprocess_digital(image_path)
         else:
             skeleton_img, binary, org_img = self.preprocess_photo(image_path)
@@ -570,7 +602,8 @@ class GcodeConverter:
         contours = self.remove_contour_duplicates(contours)
 
         # assign colors to all contours
-        color_contours = assignColors(org_img, contours, isDigital)
+        drawing_colors = self.digital_colors if self.isDigital else self.photo_colors
+        color_contours = assignColors(org_img, contours, drawing_colors, self.DEFAULT_COLOR)
 
         # TO DIVIDE CONTOURS INTO ROWS
         split_contours = []
@@ -581,8 +614,8 @@ class GcodeConverter:
             points = self.simplify_points(contour).astype(np.float32)
 
             # scale the pixels to millimeters 
-            scale_x = WIDTH_MM / WIDTH_PIXELS
-            scale_y = HEIGHT_MM / HEIGHT_PIXELS
+            scale_x = self.WIDTH_MM / self.WIDTH_PIXELS
+            scale_y = self.HEIGHT_MM / self.HEIGHT_PIXELS
             points[:, 0] *= scale_x
             points[:, 1] *= scale_y
 
@@ -614,7 +647,7 @@ class GcodeConverter:
    
                 # find which row the contour belongs to
                 _, y, _, _ = cv2.boundingRect(contour)
-                row = y // RowHeight    # 0 indexed rows
+                row = y // self.RowHeight    # 0 indexed rows
 
                 if row != current_row:
                     # tell gear motor to move to next row's first point
