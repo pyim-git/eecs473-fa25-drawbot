@@ -25,27 +25,27 @@ void GANTRY::init() {
 
   // attach pins
   // change pins as needed
-  /* FOR ESP32 PINOUTS */
+  /* FOR ESP32 PINOUTS
   z_axis.attach(47);       // attach z_axis servo to pin 47 (PWM1)
   gripper.attach(48);      // attach gripper servo to pin 48 (PWM2)
   tool_change.attach(7);   // attach tool change servo to pin 7
-
-  /* FOR PROTOTYPE PINOUTS
-  z_axis.attach(11);       // attach z_axis servo to pin 9
-  gripper.attach(9);     // attach gripper servo to pin 10
-  tool_change.attach(10);  // attach tool change servo to pin 11
   */
 
+  /* FOR PROTOTYPE PINOUTS */
+  // CAN ONLY DO 2 PINS AT A TIME WITH ARDUINO
+  z_axis.attach(10);     // attach z_axis servo to pin 9    
+  gripper.attach(9);     // attach gripper servo to pin 10
+  // tool_change.attach(10);  // attach tool change servo to pin 11
+
   // initialize servos and steppers to initial positions
-  resetPos();
-  markerUp();  // reset marker to up position (not touching board)
-  grab();     // tighten grippers
-  tool_change.write(50);   // reset position of tool change rack
+  resetPos(0);
+  // grab();     // tighten grippers
+  // tool_change.write(50);   // reset position of tool change rack
 }
 
 // move marker to the right (from robot's perspective)
 // function takes in a distance in mm and speed in mm/s
-void GANTRY::moveRight(double distance, double speed) {
+void GANTRY::moveRight(float distance, float speed) {
   // wake up gantry - only allowed if sleep pin set
   // gantry.wakup();
   
@@ -72,11 +72,20 @@ void GANTRY::moveRight(double distance, double speed) {
 
   // regrip marker (could've gotten loose)
   grab();
+  
+  // update position value
+  if (position + distance <= BELT_LENGTH) {
+    position += distance;
+  } // if ..position not hit zero
+  
+  else {
+    position == BELT_LENGTH;
+  } // else ..position hits leftmost
 } // ..moveRight()
 
 // move marker to the left (from robot's perspective)
 // function takes in a distance in mm and speed in mm/s
-void GANTRY::moveLeft(double distance, double speed) {
+void GANTRY::moveLeft(float distance, float speed) {
   // wake up gantry - only allowed if sleep pin set
   // gantry.wakup();
 
@@ -103,12 +112,31 @@ void GANTRY::moveLeft(double distance, double speed) {
 
   // regrip marker (could've gotten loose)
   grab();
+
+  // update position value
+  if (position - distance >= 0) {
+    position -= distance;
+  } // if ..position not hit zero
+  
+  else {
+    position == 0.0;
+  } // else ..position hits leftmost
 } // ..moveLeft()
 
 // move gripper fully to the left side of the gantry
-void GANTRY::resetPos() {
+  // orientation == 0 means robot is facing to the right
+  // orientation == 1 means robot is facing to the left
+void GANTRY::resetPos(int orientation) {
   // reset gantry position to left side
-  moveLeft(100, 50);
+  if (orientation == 0) {   // normal orientation
+    moveLeft(100, 50);
+  } // if ..orientation is normal - facing right
+
+  else {
+    moveRight(100, 50);
+  } // else ..orientation is reversed - facing left
+
+  // wait a bit
   delay(waitTime);
 }
 
@@ -116,7 +144,7 @@ void GANTRY::resetPos() {
 // grab marker - change angle as needed
 void GANTRY::grab() {
   // tighten gripper for servo
-  gripper.write(180);
+  gripper.write(20);
   delay(waitTime);
 } // ..grab()
 
@@ -130,30 +158,30 @@ void GANTRY::release() {
 // move marker up
 void GANTRY::markerUp() {
   // move marker up off whiteboard
-  z_axis.write(70);
+  z_axis.write(30);
   // add a little bit of delay to separate commands
   delay(waitTime);
 
   // regrip marker (could've gotten loose
-  grab();
+  // grab();
 } // ..markerUp
 
 // move marker down
 void GANTRY::markerDown() {
   // move marker down onto whiteboard
-  z_axis.write(0);
+  z_axis.write(40);
   // add a little bit of delay to separate commands
   delay(waitTime);
 
-  // regrip marker (could've gotten loose
-  grab();
+  // regrip marker (could've gotten loose)
+  // grab();
 } // ..markerDown
 
 // puts marker back into tool changing rack
 // specify postion to put it back into
 void GANTRY::putMarkerBack(int position) {
   // reset gantry position
-  resetPos();
+  resetPos(0);
 
   // move gripper to position you want
   // CHANGE THIS WHEN TESTING TO GET BEST POSITION
@@ -178,7 +206,7 @@ void GANTRY::putMarkerBack(int position) {
 // specify postion to take it out of
 void GANTRY::takeMarkerFrom(int position) {
   // reset gantry position
-  resetPos();
+  resetPos(0);
 
   // move gripper to position you want
   // CHANGE THIS WHEN TESTING TO GET BEST POSITION
@@ -200,3 +228,11 @@ void GANTRY::takeMarkerFrom(int position) {
 } // takeMarker()
 
 // -- END OF FILE --
+
+// ========================================================================
+//                                  NOTES
+// ========================================================================
+/*
+    * need to edit values for grab(), release(), markerUp(), and markerDown() functions
+    * mess around with delay values for marker changing functions
+*/
