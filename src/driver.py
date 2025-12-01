@@ -12,9 +12,9 @@ from ocr import *
 
 
 # Setup directories
-input_folder = "../color_img"
-output_folder = "../color_output"
-src_file = "shapes.png"
+input_folder = "../data"
+output_folder = "../output"
+src_file = "pi.png"
 gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"
 gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
@@ -184,7 +184,7 @@ class GcodeConverter:
 
 
 
-    def sort_split_contours(self, contours, row_height):
+    def sort_split_contours(self, contours):
         """sort contours by rows
             row height = gantry length"""
         
@@ -200,7 +200,7 @@ class GcodeConverter:
             x, y, w, h = cv2.boundingRect(contour)
             
             # Calculate which row this contour belongs to
-            row_num = y // row_height 
+            row_num = y // RowHeight 
             left = min(contour[0][0][0], contour[-1][0][0])
             right = max(contour[0][0][0], contour[-1][0][0])
             contours_data[row_num].append({
@@ -218,7 +218,6 @@ class GcodeConverter:
         # sort all paths 
         prevRow_x = 0
         sorted_contours = []
-        row_directions = [[] for _ in range(math.ceil(HEIGHT_MM/RowHeight))] 
         for row_num, row_contours in enumerate(contours_data):
             if (len(row_contours) > 0) :
 
@@ -226,11 +225,9 @@ class GcodeConverter:
                 if abs(row_bounds[row_num][0] - prevRow_x) < abs(row_bounds[row_num][1] - prevRow_x):
                    # Left->Right (sort by contour's rigtmost endpoint)
                     row_contours.sort(key=lambda item: item['bounds'][1])    
-                    row_directions[row_num].append('LtoR')
                 else:
                     # Right->Left
                     row_contours.sort(key=lambda item: -item['bounds'][0])
-                    row_directions[row_num].append('RtoL')
 
                 merged_contours = self.merge_contours([item['contour_data'] for item in row_contours])
                 row_contours = self.remove_path_retrace(merged_contours)
@@ -249,7 +246,7 @@ class GcodeConverter:
 
                 prevRow_x = prev_x
                 sorted_contours.extend(row_contours)
-        return sorted_contours, row_directions
+        return sorted_contours
     
 
 
@@ -447,9 +444,9 @@ class GcodeConverter:
 
         
     
-    def splitContoursHorizontally(self, contour, color, split_y):
+    def splitContoursHorizontally(self, contour, color):
         """split the drawing space into even rows given a specified row height
-            split_y = row height in mm
+            RowHeight = row height in mm
         """
         split_contours= []
 
@@ -458,8 +455,8 @@ class GcodeConverter:
         
         # if the bounding region of contour falls in the row, no need to split
         x,y,w,h = cv2.boundingRect(contour)
-        if int(y // split_y) == int((y+h)// split_y):
-            split_contours.append({'color':color,
+        if int(y // RowHeight) == int((y+h)// RowHeight):
+            split_contours.append({'color': color,
                                     'contour': contour})
             return split_contours
 
@@ -478,10 +475,10 @@ class GcodeConverter:
             # add current point to current row and check if next point is in a different row
             row_points.append(p1)
             
-            row_diff = abs(int(p2[1] // split_y) - int(p1[1] // split_y))
+            row_diff = abs(int(p2[1] // RowHeight) - int(p1[1] // RowHeight))
             if (row_diff == 0):
                 continue
-            if (row_diff == 1 and (p2[1] % split_y ==0) and (p1[1] % split_y == 0)):
+            if (row_diff == 1 and (p2[1] % RowHeight ==0) and (p1[1] % RowHeight == 0)):
                 continue
             
 
@@ -489,9 +486,9 @@ class GcodeConverter:
 
             for j in range(row_diff):
                 if goDown: # points going down, horizontal cross section below p1
-                    y_coord = (split_y * int(p1[1] // split_y)) + split_y
+                    y_coord = (RowHeight * int(p1[1] // RowHeight)) + RowHeight
                 else: # points going up, horizontal cross section above p1
-                    y_coord = (split_y* int(p2[1]//split_y)) + ((row_diff-j) * split_y)
+                    y_coord = (RowHeight* int(p2[1]//RowHeight)) + ((row_diff-j) * RowHeight)
 
                 # find the intersection point on the cross section: y = mx + b
                 if (abs(p2[0] - p1[0]) > .01):
@@ -591,11 +588,11 @@ class GcodeConverter:
 
             # split contour into horizontal sections
             contour = np.array(points, dtype=np.float32).reshape(-1, 1, 2)
-            split_contours.extend(self.splitContoursHorizontally(contour, color, RowHeight))
+            split_contours.extend(self.splitContoursHorizontally(contour, color))
 
 
         # sort the split contours
-        sorted_contours, row_directions = self.sort_split_contours(split_contours, RowHeight)
+        sorted_contours = self.sort_split_contours(split_contours)
 
 
         # Open file for writing: file1 for absolute positions, file2 for gear motor commands
@@ -611,6 +608,9 @@ class GcodeConverter:
                 color = item['color']
                 contour = item['contour']
                 points = contour.reshape(-1, 2)
+
+                if len(points) < 2:
+                    continue
    
                 # find which row the contour belongs to
                 _, y, _, _ = cv2.boundingRect(contour)
@@ -619,15 +619,14 @@ class GcodeConverter:
                 if row != current_row:
                     # tell gear motor to move to next row's first point
                     f2.write(f"D{row - current_row}\n")    # GO DOWN by # of rows
-                    LtoR = (row_directions[row] == 'LtoR') # resets direction at the start of new row
                     current_row = row
+
+                # resets direction at the start of every contour by looking at first two points
+                if (points[1][0] >= points[0][0]):
+                    LtoR = True
                 else:
-                    if LtoR: # change direction at every backpass
-                        if points[0][0] - prev_point[0] < 0:
-                            LtoR = False  
-                    else: 
-                        if (points[0][0]- prev_point[0]) > 0:
-                            LtoR = True
+                    LtoR = False
+        
 
                 # Move to first point (marker up)
                 f1.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
@@ -639,28 +638,28 @@ class GcodeConverter:
                     f2.write(f"Color {color}\n")
                     current_color = color
 
-                prev_point = points[0]
+                # write second point for stepper motor command
+                f1.write(f"G1 X{points[1][0]:.2f} Y{points[1][1]:.2f}\n")
+                prev_point = points[1]
+
 
                 # Marker down, draw the contour
-                for point in points[1:]:
+                for point in points[2:]:
                     f1.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
 
                     # check if from current point to next point is in the same direction as the current direction
                     if abs(point[0] -prev_point[0]) < 0.01:
-                        if not np.array_equal(prev_point, points[0]):
-                            f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
+                        f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
                     else:
                         if LtoR:
                             if point[0] - prev_point[0] < 0:
                                 LtoR = False  # backpass, add to gear motor command
-                                if not np.array_equal(prev_point, points[0]):
-                                    f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
+                                f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
                             # else: keep traversing through the points
                         else: 
                             if (point[0]-prev_point[0]) > 0:
                                 LtoR = True
-                                if not np.array_equal(prev_point, points[0]):
-                                    f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
+                                f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
 
                     prev_point = point
                 
