@@ -25,17 +25,17 @@ void GANTRY::init() {
 
   // attach pins
   // change pins as needed
-  /* FOR ESP32 PINOUTS
+  /* FOR ESP32 PINOUTS */
   z_axis.attach(47);       // attach z_axis servo to pin 47 (PWM1)
   gripper.attach(48);      // attach gripper servo to pin 48 (PWM2)
   tool_change.attach(7);   // attach tool change servo to pin 7
-  */
 
-  /* FOR PROTOTYPE PINOUTS */
+  /* FOR PROTOTYPE PINOUTS
   // CAN ONLY DO 2 PINS AT A TIME WITH ARDUINO
   z_axis.attach(10);     // attach z_axis servo to pin 9    
   gripper.attach(9);     // attach gripper servo to pin 10
   // tool_change.attach(10);  // attach tool change servo to pin 11
+  */
 
   // initialize servos and steppers to initial positions
   resetPos(0);
