@@ -190,17 +190,29 @@ const stopCamera = () => {
 
       ws.onclose = () => {
         console.log("WebSocket disconnected");
-        toast.info("Disconnected from robot");
         setRobotStatus({
           isConnected: false,
           ledOn: false,
         });
       };
 
-      ws.onmessage = (event) => {
+      ws.onmessage = async (event) => {
         console.log("Message from robot:", event.data);
-        toast.info(`Robot: ${event.data}`);
+
+        try {
+          const response = await fetch("http://localhost:500/robot_pos");
+          if (response.ok) {
+            const {x, y} = await response.json();
+            wsRef.current.send(`RobotPos: x=${x} y=${y}`);
+          }
+          else {
+            console.log("error sending robot position");
+          }
+        } catch(e) {
+          console.log("error sending robot position");
+        }
       };
+
     } catch (error) {
       console.error("Connection error:", error);
       toast.error("Failed to connect to robot");

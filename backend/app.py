@@ -18,7 +18,7 @@ from flask_cors import CORS
 import os
 from werkzeug.utils import secure_filename
 from driver import *
-from robot_detection import generate_frames
+from robot_detection import generate_frames, get_robo_loc
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for browser requests
@@ -160,6 +160,13 @@ def video_feed():
         generate_frames(),
         mimetype='multipart/x-mixed-replace; boundary=frame'
     )
+
+@app.route('/robot_pos')
+def get_robo_pos():
+    """
+    Return current robot position {'x': x, 'y': y}
+    """
+    return get_robo_loc()
 
 if __name__ == '__main__':
     print('=' * 60)
