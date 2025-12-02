@@ -12,9 +12,9 @@ from ocr import *
 
 
 # Setup directories
-input_folder = "../color_img"
-output_folder = "../color_output"
-src_file = "test1.png"
+input_folder = "../data"
+output_folder = "../output"
+src_file = "pi.png"
 gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"    # stepper motor commands
 gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"    # gear motor commands
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
@@ -24,9 +24,7 @@ gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 if not os.path.exists(output_folder):
     os.makedirs(output_folder)
 
-# user configurable drawing dimensions in mm
-WIDTH_MM = 1000
-HEIGHT_MM = 1000
+
 
 # user configurable color selects
 black_select = 'black'
@@ -37,6 +35,17 @@ purple_select = 'purple'
 orange_select = 'orange'
 brown_select = 'brown'
 yellow_select = 'yellow'
+
+# user defines the boundary of drawing, needs to leave margin for aruco tags in the whiteboard corners 
+drawing_corners = [
+    [0,50],         # top left corner
+    [0,1050],       # bottom left corner
+    [1000,50]       # top right corner
+]
+
+# user configurable drawing dimensions in mm
+WIDTH_MM = drawing_corners[2][0] - drawing_corners[0][0]
+HEIGHT_MM = drawing_corners[1][1] - drawing_corners[0][1]
 
 
 class GcodeConverter:
@@ -50,8 +59,8 @@ class GcodeConverter:
 
         # user configurable parameters
         self.isDigital = True       # true if input image is digital, else False is photo
-        self.WIDTH_MM = WIDTH_MM    
-        self.HEIGHT_MM = HEIGHT_MM
+        self.WIDTH_MM =  drawing_corners[2][0] - drawing_corners[0][0]
+        self.HEIGHT_MM = drawing_corners[1][1] - drawing_corners[0][1]
         self.DEFAULT_COLOR = 'pink' # default color for undefined colors
 
         self.digital_colors = {
