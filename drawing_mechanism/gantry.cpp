@@ -144,21 +144,21 @@ void GANTRY::resetPos(int orientation) {
 // grab marker - change angle as needed
 void GANTRY::grab() {
   // tighten gripper for servo
-  gripper.write(20);
+  gripper.write(10);
   delay(waitTime);
 } // ..grab()
 
 // release marker - change angle as needed
 void GANTRY::release() {
   // loosen gripper for servo
-  gripper.write(60);
+  gripper.write(80);
   delay(waitTime);
 }
 
 // move marker up
 void GANTRY::markerUp() {
   // move marker up off whiteboard
-  z_axis.write(110);
+  z_axis.write(90);
   // add a little bit of delay to separate commands
   delay(waitTime);
 
@@ -169,7 +169,7 @@ void GANTRY::markerUp() {
 // move marker down
 void GANTRY::markerDown() {
   // move marker down onto whiteboard
-  z_axis.write(70);
+  z_axis.write(110);
   // add a little bit of delay to separate commands
   delay(waitTime);
 
