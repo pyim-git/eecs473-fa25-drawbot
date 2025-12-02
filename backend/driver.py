@@ -566,6 +566,7 @@ class GcodeConverter:
         if self.isDigital:
             print("Running OCR for digital image")
             detected_words = detect_text(image_path, self.WIDTH_MM, self.HEIGHT_MM)
+            print("found words")
             image_text_path = transpose_print_text_to_image(detected_words, image_path)
             skeleton_img, binary, org_img = self.preprocess_digital(image_text_path)
             org_img = cv2.imread(image_path)
