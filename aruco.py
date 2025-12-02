@@ -12,8 +12,16 @@ dist_coeffs = calib_data['dist_coeffs']
 BOARD_IDS = [5,1,6,3]
 ROBOT_ID = 7
 
-WIDTH_MM =  300     # whiteboard width
-HEIGHT_MM = 300  # whiteboard height
+# user defines the boundary of drawing, needs to leave margin for aruco tags in the whiteboard corners 
+drawing_corners = [
+    [0,50],         # top left corner
+    [0,1050],       # bottom left corner
+    [1000,50]       # top right corner
+]
+
+WIDTH_MM = drawing_corners[2][0] - drawing_corners[0][0]     # whiteboard width
+HEIGHT_MM = drawing_corners[1][1] - drawing_corners[0][1]    # whiteboard height
+
 
 
 # Define known (x,y) positions of whiteboard tags in (millimeters)
