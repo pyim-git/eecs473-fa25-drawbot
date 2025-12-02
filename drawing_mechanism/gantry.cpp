@@ -25,7 +25,7 @@ void GANTRY::init() {
 
   // attach pins
   // change pins as needed
-  /* FOR ESP32 PINOUTS */
+  /* FOR ESP32 PINOUT */
   z_axis.attach(47);       // attach z_axis servo to pin 47 (PWM1)
   gripper.attach(48);      // attach gripper servo to pin 48 (PWM2)
   tool_change.attach(7);   // attach tool change servo to pin 7
@@ -39,7 +39,7 @@ void GANTRY::init() {
 
   // initialize servos and steppers to initial positions
   resetPos(0);
-  // grab();     // tighten grippers
+  grab();     // tighten grippers
   // tool_change.write(50);   // reset position of tool change rack
 }
 
@@ -158,7 +158,7 @@ void GANTRY::release() {
 // move marker up
 void GANTRY::markerUp() {
   // move marker up off whiteboard
-  z_axis.write(30);
+  z_axis.write(110);
   // add a little bit of delay to separate commands
   delay(waitTime);
 
@@ -169,7 +169,7 @@ void GANTRY::markerUp() {
 // move marker down
 void GANTRY::markerDown() {
   // move marker down onto whiteboard
-  z_axis.write(40);
+  z_axis.write(70);
   // add a little bit of delay to separate commands
   delay(waitTime);
 
@@ -233,6 +233,5 @@ void GANTRY::takeMarkerFrom(int position) {
 //                                  NOTES
 // ========================================================================
 /*
-    * need to edit values for grab(), release(), markerUp(), and markerDown() functions
     * mess around with delay values for marker changing functions
 */

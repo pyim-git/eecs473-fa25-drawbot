@@ -14,9 +14,5 @@ void setup() {
 
 void loop() {
   // TESTING LOOP FOR STUFF YAY
-  drawing.markerUp();
-  Serial.print("MARKER UP");
-
-  drawing.markerDown();
-  Serial.print("MARKER DOWN");
+  drawing.release();
 }

@@ -1,7 +1,7 @@
 // *** LIBRARIES ***
 #include "DRV8825.h"  // DRV8825 library for stepper motor control
-//#include "ESP32Servo.h"    // servo library for ESP32
- #include "Servo.h"      // servo library for Arduino (prototype testing)
+#include "ESP32Servo.h"    // servo library for ESP32
+// #include "Servo.h"      // servo library for Arduino (prototype testing)
 
 // ========================
 // ***** GANTRY CLASS *****
