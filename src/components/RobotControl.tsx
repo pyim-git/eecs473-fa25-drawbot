@@ -8,8 +8,17 @@ import {
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Separator } from "./ui/separator";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
 
 import { Alert, AlertDescription } from "./ui/alert";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
 import {
   Bot,
   WifiOff,
@@ -28,6 +37,12 @@ interface RobotStatus {
   ledOn: boolean;
 }
 
+interface ImageInfo {
+  name: string;
+  filename: string;
+  path: string;
+}
+
 export function RobotControl() {
   const [robotStatus, setRobotStatus] = useState<RobotStatus>({
     isConnected: true,
@@ -38,12 +53,40 @@ export function RobotControl() {
   const [isSendingCommands, setIsSendingCommands] = useState(false);
   const [isCameraEnabled, setIsCameraEnabled] = useState(false);
   const [cameraError, setCameraError] = useState<string | null> (null);
+  const [robotIpAddress, setRobotIpAddress] = useState<string>("172.20.10.2");
+  const [availableImages, setAvailableImages] = useState<ImageInfo[]>([]);
+  const [selectedImage, setSelectedImage] = useState<string>("myimage");
 
   const wsRef = useRef<WebSocket | null>(null);
   const videoref = useRef<HTMLImageElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
-  const hardcodedImage = "backend/color_output/myimage.png"; // ← put your image in /public/images/myimage.png
+  // Fetch available images on component mount
+  useEffect(() => {
+    const fetchImages = async () => {
+      try {
+        const response = await fetch("http://localhost:500/images");
+        if (response.ok) {
+          const data = await response.json();
+          const images = data.images || [];
+          setAvailableImages(images);
+          // Set default selected image if available
+          if (images.length > 0) {
+            setSelectedImage((currentSelected) => {
+              const imageNames = images.map((img: ImageInfo) => img.name);
+              // Keep current selection if it exists, otherwise use first image
+              return imageNames.includes(currentSelected) ? currentSelected : images[0].name;
+            });
+          }
+        } else {
+          console.error("Failed to fetch images");
+        }
+      } catch (error) {
+        console.error("Error fetching images:", error);
+      }
+    };
+    fetchImages();
+  }, []);
 
   // Set video source when camera is enabled and image element is available
   useEffect(() => {
@@ -114,11 +157,15 @@ const stopCamera = () => {
 
   // --- Connection handling ---
   const handleConnect = async () => {
+    if (!robotIpAddress.trim()) {
+      toast.error("Please enter a valid IP address");
+      return;
+    }
+
     setIsConnecting(true);
 
     try {
-      const ws = new WebSocket("ws://35.3.131.7/ws");
-      //const ws = new WebSocket("ws://172.20.10.2/ws");
+      const ws = new WebSocket(`ws://${robotIpAddress.trim()}/ws`);
       wsRef.current = ws;
 
       ws.onopen = () => {
@@ -182,32 +229,53 @@ const stopCamera = () => {
       return;
     }
 
+    if (!selectedImage) {
+      toast.error("Please select an image");
+      return;
+    }
+
     setIsSendingCommands(true);
 
     try {
-      // Load the file from public/
-      const response = await fetch("backend/color_output/myimage1.gcode");
-      const gcodeText = await response.text();
+      // Load the file from public/ using selected image name
+      const response_stepper = await fetch(`backend/color_output/${selectedImage}1.gcode`);
+      const stepperGCodeText = await response_stepper.text();
+      const response_gear = await fetch(`backend/color_output/${selectedImage}2.gcode`);
+      const gearGCodeText = await response_gear.text();
 
-      // Split & filter
-      //const gcodeLines = gcodeText.split("Contour").map(line => line.trim()).filter(line => line && !line.startsWith(";"));
-      //console.log(`Loaded ${gcodeLines.length} GCode lines`);
-      const contours = gcodeText
+      const stepper_contours = stepperGCodeText
         .split(/(?=Contour\s+\d+)/) // split BEFORE each "Contour <num>"
         .map(chunk => chunk.trim()) // clean up whitespace
         .filter(chunk => chunk.length > 0); // remove empties
 
-      console.log(`Found ${contours.length} contours.`);
+      console.log(`Found ${stepper_contours.length} stepper contours.`);
 
       // Example: send one contour at a time through a WebSocket
-      for (const contour of contours) {
+      for (const contour of stepper_contours) {
         console.log("Sending contour chunk:\n", contour);
         wsRef.current.send(contour+'\n');
         await new Promise(resolve => setTimeout(resolve, 10));
       }
-      wsRef.current.send("GCODE_END");
+      wsRef.current.send("STEPPER_GCODE_END"); // sent all gcode
 
-      toast.success(`Sent ${contours.length} contours`);
+      toast.success(`Sent ${stepper_contours.length} stepper contours`);
+
+      const gear_contours = gearGCodeText
+        .split(/(?=Contour\s+\d+)/) // split BEFORE each "Contour <num>"
+        .map(chunk => chunk.trim()) // clean up whitespace
+        .filter(chunk => chunk.length > 0); // remove empties
+
+      console.log(`Found ${gear_contours.length} gear contours.`);
+
+      // Example: send one contour at a time through a WebSocket
+      for (const contour of gear_contours) {
+        console.log("Sending contour chunk:\n", contour);
+        wsRef.current.send(contour+'\n');
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      wsRef.current.send("GEAR_GCODE_END"); // sent all gcode
+
+      toast.success(`Sent ${gear_contours.length} gear contours`);
     } catch (err) {
       console.error("Failed to load or send GCode:", err);
       toast.error("Error loading GCode file");
@@ -286,11 +354,22 @@ const stopCamera = () => {
 
                 <div className="space-y-2">
                   <h4 className="font-medium">Robot Connection</h4>
-                  <p className="text-sm text-muted-foreground">IP: 172.20.10.2</p>
+                  <div className="space-y-2">
+                    <Label htmlFor="robot-ip">Robot IP Address</Label>
+                    <Input
+                      id="robot-ip"
+                      type="text"
+                      placeholder="172.20.10.2"
+                      value={robotIpAddress}
+                      onChange={(e) => setRobotIpAddress(e.target.value)}
+                      disabled={isConnecting || robotStatus.isConnected}
+                      className="w-full"
+                    />
+                  </div>
                   <Button
                     className="w-full"
                     onClick={handleConnect}
-                    disabled={isConnecting}
+                    disabled={isConnecting || !robotIpAddress.trim()}
                   >
                     {isConnecting ? "Connecting..." : "Connect"}
                   </Button>
@@ -309,6 +388,9 @@ const stopCamera = () => {
                   >
                     Connected
                   </Badge>
+                  <p className="text-sm text-muted-foreground mt-2">
+                    IP: {robotIpAddress}
+                  </p>
                 </div>
 
                 {/* LED Status - ON */}
@@ -349,17 +431,57 @@ const stopCamera = () => {
               </div>
             ) : (
               <>
-                {/* Hardcoded Processed Image */}
+                {/* Image Selection */}
                 <div className="space-y-4">
-                  <h4 className="font-medium">Processed Image Preview</h4>
-                  <div className="border rounded-lg overflow-hidden bg-muted">
-                    <img
-                      src={hardcodedImage}
-                      alt="Processed drawing"
-                      className="w-full h-auto"
-                    />
+                  <h4 className="font-medium">Select Image</h4>
+                  <div className="space-y-2">
+                    <Label htmlFor="image-select">Choose an image to send</Label>
+                    <Select
+                      value={selectedImage}
+                      onValueChange={setSelectedImage}
+                    >
+                      <SelectTrigger id="image-select" className="w-full">
+                        <SelectValue placeholder="Select an image" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {availableImages.length === 0 ? (
+                          <SelectItem value="none" disabled>
+                            No images available
+                          </SelectItem>
+                        ) : (
+                          availableImages.map((image) => (
+                            <SelectItem key={image.name} value={image.name}>
+                              {image.name}
+                            </SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                    {availableImages.length === 0 && (
+                      <p className="text-sm text-muted-foreground">
+                        No processed images found. Upload and process an image first.
+                      </p>
+                    )}
                   </div>
                 </div>
+
+                {/* Processed Image Preview */}
+                {selectedImage && (
+                  <div className="space-y-4">
+                    <h4 className="font-medium">Processed Image Preview</h4>
+                    <div className="border rounded-lg overflow-hidden bg-muted">
+                      <img
+                        src={`backend/color_output/${selectedImage}.png`}
+                        alt="Processed drawing"
+                        className="w-full h-auto"
+                        onError={(e) => {
+                          console.error("Failed to load image:", selectedImage);
+                          toast.error(`Failed to load image: ${selectedImage}`);
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* Send Commands */}
                 <div className="space-y-4">
