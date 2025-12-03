@@ -339,6 +339,11 @@ void TaskGcodeParse(void *pvParameters) {
         strcpy(cmd.command, "D");
         cmd.nextY = points_down; // nextY stores the relative points down
         cmd.hasY = true;
+      } else if (current_line.startsWith("B")) {
+        // follows a G1 backpass point (gear motor stops)
+
+
+
       }
 
       // Send to execution queue
@@ -436,6 +441,16 @@ void TaskGcodeExec(void *pvParameters) {
         xGearStatus = xQueueReceive(queGear, &receivedGear_cmd, xTicksToWait); // pop off color commands
       } // if ..C
 
+      else if (strcmp(receivedGear_cmd.command, "B") == 0) {
+        // reaches backpass point, stepper motor command stop executing for this pass
+        xSemaphoreTake(ExecuteStepperSemaphore, 0);
+        xStepperStatus=xQueueReceive(queQueue, &receivedGear_cmd, xTicksToWait); 
+        
+      } else if (strcmp(receivedGear_cmd.command, "D") == 0) {
+        // switches row: moves down by # of points
+
+      }
+
       // Set target coordinates for the robot
       if (receivedGear_cmd.hasX && receivedGear_cmd.hasY) {
         xSemaphoreTake(poseMutex, portMAX_DELAY);
@@ -445,7 +460,10 @@ void TaskGcodeExec(void *pvParameters) {
         
         // Wait for robot to reach position
         vTaskDelay(pdMS_TO_TICKS(1000));
-      } // set coordinates for robot if command executed
+      }
+
+      
+      // set coordinates for robot if command executed
       else {
         // No command in queue, just wait
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -934,9 +952,6 @@ void stepperTask(void *pvParameters) {
   (void)pvParameters;
   const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
   for (;;) {
-    // checks if stepper queue is empty or full
-    UBaseType_t messagesInQueue = uxQueueMessagesWaiting(queStepper);
-
     // calculate stepper velocity - slope * calc velocity
     float stepper_velocity = calculated_velocity*(stepper.nextY-stepper.currentY)/(stepper.nextX-stepper.currentX);
     
@@ -953,6 +968,7 @@ void stepperTask(void *pvParameters) {
   } // for ..;;
 } // ..stepperTask()
 
+
 // ====== VELOCITY CALCULATION =====
 void velocityTask (void *pvParameters) {
   (void)pvParameters;
@@ -964,6 +980,7 @@ void velocityTask (void *pvParameters) {
       vTaskDelayUntil(&lastWakeTime, period);
   }
 } // ... velocityTask()
+
 
 // ====== NAVIGATION TASK (WITH BACKWARD MOTION) ======
 void navigationTask(void *pv) {
@@ -1098,6 +1115,7 @@ void navigationTask(void *pv) {
                 // --------------------------------------------------
                 // requires 3 seconds timeout in between camera updates
                 TickType_t currentTime = xTaskGetTickCount();
+                bool pos_correct = true;
 
                 // robot arrived at point and timeout is met
                 if (currentTime - LastUpdateTime >= TIMEOUT_TICKS) {
@@ -1108,29 +1126,34 @@ void navigationTask(void *pv) {
                   ws.textAll("CAMERA_REQUEST");
 
                   if (xSemaphoreTake(CameraUpdatedSemaphore, pdMS_TO_TICKS(5000)) == pdTRUE) {
-                    xSemaphoreTake(printMutex, portMAX_DELAY);
-                    Serial.printf("Update camX: %.2f and camY  %.2f\n", camX, camY);
-                    xSemaphoreGive(printMutex);
-                    LastUpdateTime = xTaskGetTickCount();
+                    if (cam_Valid) {
+                      xSemaphoreTake(printMutex, portMAX_DELAY);
+                      Serial.printf("Update camX: %.2f and camY  %.2f\n", camX, camY);
+                      xSemaphoreGive(printMutex);
+                      LastUpdateTime = xTaskGetTickCount();
+                       // check if within tolerance
+                      float distance = sqrt(pow((camX - x), 2) + pow((camY - y), 2));
 
-                    // check if within tolerance
-                    float distance = sqrt(pow((camX - x), 2) + pow((camY - y), 2));
-
-                    if (distance >= 10)
-                    {
-                      x = camX;
-                      y = camY; 
+                      if (distance >= 10)
+                      { // correct position
+                        gantry.liftMarker();
+                        stepper.markerDown = false;
+                        x = camX;
+                        y = camY; 
+                        pos_correct = false;
+                      } 
                     }
-                    else
-                    {
-                      // pop the command from the queue
-                      xSemaphoreGive(ExecuteGearSemaphore);
-                      GcodeCommand receivedGear_cmd;
-                      BaseType_t xGearStatus = xQueueReceive(queGear, &receivedGear_cmd, xTicksToWait);
-                    }
-                
                   }
                 }
+  
+                // pop the command from the queue, ready to issue next command
+                if (pos_correct) {
+                  xSemaphoreGive(ExecuteGearSemaphore);
+                  xSemaphoreGive(ExecuteStepperSemaphore);
+                  GcodeCommand receivedGear_cmd;
+                  BaseType_t xGearStatus = xQueueReceive(queGear, &receivedGear_cmd, xTicksToWait);
+                }
+                
                 
                 // After holding for a while, move to next setpoint
                 if (millis() - stateChangeTime > SETTLE_TIME * 5) {
