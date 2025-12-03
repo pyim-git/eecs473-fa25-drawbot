@@ -10,13 +10,13 @@ from color import *
 from ocr import *
 
 
-
 # Setup directories
-input_folder = "../data"
-output_folder = "../output"
-src_file = "pi.png"
-gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"    # stepper motor commands
+input_folder = "../color_img"
+output_folder = "../color_output"
+src_file = "215notes.png"
+gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"    # stepper motor commands 
 gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"    # gear motor commands
+gcode_file3 = src_file.rsplit('.',1)[0] + "3.gcode"     # for plotting
 gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
 
 
@@ -38,9 +38,9 @@ yellow_select = 'yellow'
 
 # user defines the boundary of drawing, needs to leave margin for aruco tags in the whiteboard corners 
 drawing_corners = [
-    [0,50],         # top left corner
-    [0,1050],       # bottom left corner
-    [1000,50]       # top right corner
+    [0,20],        # top left corner
+    [0,1020],       # bottom left corner
+    [1000,20]       # top right corner
 ]
 
 # user configurable drawing dimensions in mm
@@ -54,14 +54,15 @@ class GcodeConverter:
         self.TRACE = "G1"    # robot tracing a path to next point (slower speed)
         self.RowHeight = 100    # in mm
 
+        # resize image dimensions for image processing 
         self.WIDTH_PIXELS = 2000
         self.HEIGHT_PIXELS = 2000   
 
         # user configurable parameters
-        self.isDigital = True       # true if input image is digital, else False is photo
+        self.isDigital = True           # true if input image is digital, False if photo
         self.WIDTH_MM =  drawing_corners[2][0] - drawing_corners[0][0]
         self.HEIGHT_MM = drawing_corners[1][1] - drawing_corners[0][1]
-        self.DEFAULT_COLOR = 'pink' # default color for undefined colors
+        self.DEFAULT_COLOR = 'pink'     # default color for undefined colors
 
         self.digital_colors = {
             'black': black_select,
@@ -581,7 +582,7 @@ class GcodeConverter:
     
 
 
-    def image_to_gcode(self, image_path, output_file1, output_file2):
+    def image_to_gcode(self, image_path, output_file1, output_file2, output_file3):
         """write gcode to output file"""
         # detected_words = detect_text(image_path)
         # image_with_text = transpose_print_text_to_image(detected_words, image_path)
@@ -637,8 +638,8 @@ class GcodeConverter:
         sorted_contours = self.sort_split_contours(split_contours)
 
 
-        # Open file for writing: file1 for absolute positions, file2 for gear motor commands
-        with open(output_file1, 'w') as f1, open(output_file2, 'w') as f2:
+        # Open file for writing: file1 for stepper commands, file2 for gear commands, file 3 for plotting
+        with open(output_file1, 'w') as f1, open(output_file2, 'w') as f2, open (output_file3,'w') as f3:
             # initial conditions
             current_row = 0 
             LtoR = True
@@ -660,7 +661,7 @@ class GcodeConverter:
 
                 if row != current_row:
                     # tell gear motor to move to next row's first point
-                    f2.write(f"D{row - current_row}\n")    # GO DOWN by # of rows
+                    f2.write(f"D{(row - current_row)*self.RowHeight}\n")    # GO DOWN by # of points
                     current_row = row
 
                 # resets direction at the start of every contour by looking at first two points
@@ -669,10 +670,13 @@ class GcodeConverter:
                 else:
                     LtoR = False
         
+                points_gear = points.copy()
+                points_gear[:, 0] += drawing_corners[0][0]   # add x offset 
+                points_gear[:, 1] += drawing_corners[0][1]   # add y offset
 
-                # Move to first point (marker up)
-                f1.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
-                f2.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
+                points_stepper = points.copy()
+                points_stepper[:,0] += drawing_corners[0][0] # add x offset
+                points_stepper[:,1] -= row*self.RowHeight    # y offset is relative positions in [0,RowHeight]
 
                 # sends color command if color changes
                 if (current_color != color):
@@ -680,15 +684,25 @@ class GcodeConverter:
                     f2.write(f"Color {color}\n")
                     current_color = color
 
-                # write second point for stepper motor command
-                f1.write(f"G1 X{points[1][0]:.2f} Y{points[1][1]:.2f}\n")
-                prev_point = points[1]
+                # Move to first point (marker up)
+                f1.write(f"G0 X{points_stepper[0][0]:.2f} Y{points_stepper[0][1]:.2f}\n")
+                f2.write(f"G0 X{points_gear[0][0]:.2f} Y{points_gear[0][1]:.2f}\n")
+                f3.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
 
+                f3.write(f"Color {color}\n")
+
+                # for plotting original points
+                for point in points[1:]:
+                    f3.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
+
+                # stepper motor G1 commands 
+                for point in points_stepper[1:]:
+                    f1.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
+                    
+                prev_point = points_gear[1]
 
                 # Marker down, draw the contour
-                for point in points[2:]:
-                    f1.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
-
+                for point in points_gear[2:]:
                     # check if from current point to next point is in the same direction as the current direction
                     if abs(point[0] -prev_point[0]) < 0.01:
                         f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
@@ -704,22 +718,25 @@ class GcodeConverter:
                                 f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
 
                     prev_point = point
-                
+                                
                 # add last point
-                f2.write(f"G1 X{points[-1][0]:.2f} Y{points[-1][1]:.2f}\n")
-                prev_point = points[-1]
-        
-                f2.write("\n")
+                f2.write(f"G1 X{points_gear[-1][0]:.2f} Y{points_gear[-1][1]:.2f}\n")
+                prev_point = points_gear[-1]
+
                 f1.write("\n")
+                f2.write("\n")
+                f3.write("\n")
 
             f1.write("M30\n")      # end of drawing, program completes
-            f2.write("M30\n")      
+            f2.write("M30\n") 
+            f3.write("M30\n")     
 
 
-        print(f"G-code successfully written to {output_file1} and {output_file2}")
+        print(f"G-code successfully written to {output_file1}, {output_file2}, and {output_file3}")
         f1.close()
         f2.close()
-        return output_file1, output_file2
+        f3.close()
+        return output_file1, output_file2, output_file3
 
     
 
@@ -729,9 +746,9 @@ def main():
 
     try:
         image_path = f"{input_folder}/{src_file}" 
-        output_file1, _ = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file1}", f"{output_folder}/{gcode_file2}" )
-        print(f"G-code saved to: {output_file1}") 
-        visualize_gcode(output_file1, f"{output_folder}", gcode_plotfile, WIDTH_MM, HEIGHT_MM)
+        output_file1, output_file2, output_file3 = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file1}", f"{output_folder}/{gcode_file2}",f"{output_folder}/{gcode_file3}" )
+        print(f"G-code saved to: {output_file1} {output_file2}") 
+        visualize_gcode(output_file3, f"{output_folder}", gcode_plotfile, WIDTH_MM, HEIGHT_MM)
 
     except Exception as e:
         print(f"Error with custom image: {e}")
@@ -740,3 +757,4 @@ def main():
 if __name__ == "__main__":
     main()
     
+

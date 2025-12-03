@@ -124,5 +124,3 @@ def detectColor(image, contour, color_masks, stroke_width =30):
     
 
             
-
-
