@@ -28,13 +28,19 @@ if not os.path.exists(output_folder):
 
 # user configurable color selects
 black_select = 'black'
-blue_select = 'blue'
-red_select = 'red'
+blue_select = 'black'
+red_select = 'purple'
 green_select = 'green'
 purple_select = 'purple'
-orange_select = 'orange'
-brown_select = 'brown'
-yellow_select = 'yellow'
+orange_select = 'green'
+brown_select = 'purple'
+yellow_select = 'green'
+
+# robot drawing colors
+color1 = 'black'
+color2 = 'purple'
+color3 = 'green'
+
 
 # user defines the boundary of drawing, needs to leave margin for aruco tags in the whiteboard corners 
 drawing_corners = [
@@ -85,6 +91,15 @@ class GcodeConverter:
             'brown': brown_select,
             'yellow': yellow_select
         }
+
+        # user configurable robot drawing colors with corresponding marker positions
+        self.draw_positions = {
+            color1: 1,
+            color2: 2,
+            color3: 3
+        }
+
+        
         
 
 
@@ -680,8 +695,7 @@ class GcodeConverter:
 
                 # sends color command if color changes
                 if (current_color != color):
-                    f1.write(f"Color {color}\n")
-                    f2.write(f"Color {color}\n")
+                    f2.write(f"Color {self.draw_positions[color]}\n")
                     current_color = color
 
                 # Move to first point (marker up)
@@ -695,32 +709,36 @@ class GcodeConverter:
                 for point in points[1:]:
                     f3.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
 
-                # stepper motor G1 commands 
-                for point in points_stepper[1:]:
-                    f1.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
-                    
                 prev_point = points_gear[1]
 
                 # Marker down, draw the contour
-                for point in points_gear[2:]:
+                for i, point in enumerate(points_gear[2:]):
                     # check if from current point to next point is in the same direction as the current direction
-                    if abs(point[0] -prev_point[0]) < 0.01:
+                    f1.write(f"G1 X{points_stepper[i+1][0]:.2f} Y{points_stepper[i+1][1]:.2f}\n")
+
+                    if abs(point[0] - prev_point[0]) < 0.01:
                         f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
+                        f1.write("B\n")
+
                     else:
                         if LtoR:
                             if point[0] - prev_point[0] < 0:
                                 LtoR = False  # backpass, add to gear motor command
                                 f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
+                                f1.write("B\n")
                             # else: keep traversing through the points
                         else: 
                             if (point[0]-prev_point[0]) > 0:
                                 LtoR = True
+                                f1.write("B\n")
                                 f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
 
                     prev_point = point
                                 
                 # add last point
                 f2.write(f"G1 X{points_gear[-1][0]:.2f} Y{points_gear[-1][1]:.2f}\n")
+                f1.write(f"G1 X{points_stepper[-1][0]:.2f} Y{points_stepper[-1][1]:.2f}\n")
+                f1.write("B\n")
                 prev_point = points_gear[-1]
 
                 f1.write("\n")
