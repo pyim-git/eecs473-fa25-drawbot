@@ -11,19 +11,20 @@
 #include <string>
 #include <math.h>
 #include "SparkFun_Qwiic_OTOS_Arduino_Library.h"
-
+// ====== FREE RTOS VARS =======
+#define INCLUDE_vTaskSuspend        1
+#define INCLUDE_xTaskResumeFromISR  1
 // ====== PIN DEFINITIONS ======
-#define CUSTOM_SDA 3  
-#define CUSTOM_SCL 4
+#define CUSTOM_SDA 4  
+#define CUSTOM_SCL 5
+
+// ====== encoder PINS ======
 #define ENC_R_A 18
 #define ENC_R_B 8
 #define ENC_L_A 40
 #define ENC_L_B 39
-#define BAT 38
-#define IN1_R 16
-#define IN2_R 17
-#define IN3_L 41
-#define IN4_L 42
+#define BAT 1
+
 // ====== ROBOT PARAMETERS ======
 #define WHEEL_RADIUS 0.0358      // meters
 #define WHEEL_BASE   0.246063    // meters
@@ -39,6 +40,7 @@ struct GcodeCommand {
   char command[8];
   float nextX, nextY;
   bool hasX, hasY;
+  float angle;
   int color;
 }; 
 
@@ -95,6 +97,7 @@ SemaphoreHandle_t CameraUpdatedSemaphore;
 QueueHandle_t queStepper;
 QueueHandle_t queGear;
 TaskHandle_t taskWeb;
+TaskHandle_t task_gcode_parse;
 
 // ====== GCODE BUFFER ======
 String gcodeBuffer = "";
@@ -119,7 +122,8 @@ double wrapAngle(double angle) {
 }
 
 float getBatteryPercentage() {
-  return (analogRead(BAT) / 4095.0) * 100;
+  // return (analogRead(BAT) / 4095.0) * 100;
+  return analogRead(BAT);
 }
 
 void ensureMarkerUp() {
@@ -183,6 +187,7 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
     else {
       gcodeBuffer += msg;
       Serial.println("Received: " + msg);
+      ws.textAll("Received: " + msg);
     }
   }
 }
@@ -205,31 +210,34 @@ struct GcodeCommand parseGcodeLine(const String& line) {
   
   if (line.startsWith("G0")) strcpy(cmd.command, "G0");
   else if (line.startsWith("G1")) strcpy(cmd.command, "G1");
+
   else if (line.startsWith("C ")) {
+    Serial.println("COLOR DETECTED");
     strcpy(cmd.command, "C");
     cmd.color = line.substring(2).toInt();
     return cmd;
   }
-  else if (line.startsWith("D")) {
-    strcpy(cmd.command, "D");
-    cmd.nextY = line.substring(1).toFloat();
-    cmd.hasY = true;
-    return cmd;
-  }
   else if (line.startsWith("B")) {
+    Serial.println("B DETECTED");
     strcpy(cmd.command, "B");
     return cmd;
   }
   
   int xIdx = line.indexOf('X');
-  if (xIdx >= 0) {
-    cmd.nextX = line.substring(xIdx + 1).toFloat();
+  if(xIdx !=-1) {
+    String xStr = line.substring(xIdx + 1);
+    int spaceIndex= xStr.indexOf(' ');
+    if (spaceIndex != -1) {
+      xStr = xStr.substring(0, spaceIndex);
+    }
+    cmd.nextX = xStr.toFloat();
     cmd.hasX = true;
   }
-  
+
   int yIdx = line.indexOf('Y');
-  if (yIdx >= 0) {
-    cmd.nextY = line.substring(yIdx + 1).toFloat();
+  if(yIdx !=-1) {
+    String yStr = line.substring(yIdx + 1);
+    cmd.nextY = yStr.toFloat();
     cmd.hasY = true;
   }
   
@@ -240,6 +248,8 @@ void TaskGcodeParse(void *pvParameters) {
   static bool isGearGcode = true;
   
   for (;;) {
+    //battery
+    // ws.textAll("BATTERY_STATUS " + String(getBatteryPercentage()) + "%");
     int newlinePos = gcodeBuffer.indexOf('\n');
     if (newlinePos < 0) {
       vTaskDelay(pdMS_TO_TICKS(10));
@@ -261,13 +271,17 @@ void TaskGcodeParse(void *pvParameters) {
     QueueHandle_t targetQueue = isGearGcode ? queGear : queStepper;
     if (targetQueue == NULL) {
         Serial.println("Queue failed to create!");
+        ws.textAll("Queue failed to create!");
     }
     if (xQueueSend(targetQueue, &cmd, pdMS_TO_TICKS(100)) != pdPASS) {
       Serial.println("Queue full! Dropped: " + line);
+      ws.textAll("Queue full! Dropped: " + line);
+      vTaskSuspend(NULL);
     }
     else {
       gcodeBuffer.remove(0, newlinePos + 1); //queued, remove from buffer
       Serial.println("Queued: " + line);
+      ws.textAll("Queued: " + line);
     }
     
     vTaskDelay(pdMS_TO_TICKS(1));
@@ -277,9 +291,11 @@ void TaskGcodeParse(void *pvParameters) {
 // ====== GEAR EXECUTION ======
 void executeGearCommand(const GcodeCommand& cmd) {
   if (strcmp(cmd.command, "G0") == 0) {
+    ws.textAll("g0 executable");
     ensureMarkerUp();
   }
   else if (strcmp(cmd.command, "G1") == 0) {
+    ws.textAll("g1 executable");
     ensureMarkerDown();
   }
   else if (strcmp(cmd.command, "C") == 0) {
@@ -298,36 +314,36 @@ void executeGearCommand(const GcodeCommand& cmd) {
 }
 
 void TaskGcodeExec(void *pvParameters) {
-  while (!gcodeReady) vTaskDelay(pdMS_TO_TICKS(100));
+  // while (!gcodeReady) vTaskDelay(pdMS_TO_TICKS(100));
   
   struct GcodeCommand cmd;
   
   for (;;) {
-    xSemaphoreTake(ExecuteGearSemaphore, portMAX_DELAY);
-    
+    // xSemaphoreTake(ExecuteGearSemaphore, portMAX_DELAY);
     if (xQueuePeek(queGear, &cmd, pdMS_TO_TICKS(100)) != pdPASS) {
-      xSemaphoreGive(ExecuteGearSemaphore);
+      // xSemaphoreGive(ExecuteGearSemaphore);
       vTaskDelay(pdMS_TO_TICKS(10));
       continue;
     }
-    
     executeGearCommand(cmd);
-    
     if (cmd.hasX && cmd.hasY) {
+      //strcmp(cmd.command, "G0");
       xSemaphoreTake(poseMutex, portMAX_DELAY);
       x_s = cmd.nextX;
       y_s = cmd.nextY;
       theta_s = (cmd.nextX-x)!=0? tanh((cmd.nextY-y)/(cmd.nextX-x)): 0; //RECTANGLE ONLY!!!
       xSemaphoreTake(printMutex, portMAX_DELAY);
-      ws.textAll("EXECUTING: X: " + String(cmd.nextX) + " Y: " + String(cmd.nextY));
+      ws.textAll("EXEC GCODE: X: " + String(cmd.nextX) + " Y: " + String(cmd.nextY));
       ws.textAll("MARKER " + String(stepper.markerDown ? "DOWN" : "UP"));
       ws.textAll("COLOR " + String(stepper.color));
       xSemaphoreGive(printMutex);
       xSemaphoreGive(poseMutex);
       vTaskDelay(pdMS_TO_TICKS(1000));
+    } else {
+
     }
-    
-    xSemaphoreGive(ExecuteGearSemaphore);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    // xSemaphoreGive(ExecuteGearSemaphore);
   }
 }
 
@@ -379,6 +395,7 @@ void SerialCommandTask(void *pv) {
 
 // ====== ODOMETRY ======
 void encoderTask(void *pv) {
+  while (!gcodeReady) vTaskDelay(pdMS_TO_TICKS(100));
   static long prevL = 0, prevR = 0;
   const double alpha_filter = 0.1;
   const double dt = LOOP_DT_MS / 1000.0;
@@ -511,12 +528,16 @@ void pidTask(void *pv) {
     output_R = constrain(output_R, -255.0, 255.0);
     lastErrorR = errorR;
     
-    // === Debug Output ===
+    //=== Debug Output ===
     // Serial.printf("PID: L[set=%.3f cur=%.3f err=%.3f out=%.1f] R[set=%.3f cur=%.3f err=%.3f out=%.1f]\n",
     //               set_L, input_L, errorL, output_L,
     //               set_R, input_R, errorR, output_R);
 
-    // ws.textAll("PWM");
+    ws.textAll("PWM");
+    if (set_L >0 || set_R > 0) {
+      ws.textAll("Left " + String(set_L));
+      ws.textAll("Right " + String(set_R));
+    }
 
     // === Apply PWM ===
     int pwmL = remapPID(output_L, isRotatingInPlace);
@@ -524,8 +545,8 @@ void pidTask(void *pv) {
     
     // Serial.printf("PWM: LEFT=%d RIGHT=%d\n\n", pwmL, pwmR);
 
-    motorWrite(true, pwmL);
-    motorWrite(false, pwmR);
+    // motorWrite(true, pwmL);
+    // motorWrite(false, pwmR);
 
     vTaskDelay(pdMS_TO_TICKS(LOOP_DT_MS));
   }
@@ -564,7 +585,7 @@ void handleGoalReached() {
   static unsigned long lastCameraCheck = 0;
   const unsigned long CAMERA_INTERVAL = 3000;
   
-  xSemaphoreGive(ExecuteGearSemaphore);
+  // xSemaphoreGive(ExecuteGearSemaphore);
   
   if (millis() - lastCameraCheck > CAMERA_INTERVAL) {
     lastCameraCheck = millis();
@@ -589,10 +610,13 @@ void handleGoalReached() {
   xSemaphoreGive(ExecuteStepperSemaphore);
   struct GcodeCommand cmd;
   xQueueReceive(queGear, &cmd, pdMS_TO_TICKS(100));
+  vTaskResume(task_gcode_parse); // one space in queue, continue parsing.
 }
 
 // ====== NAVIGATION ======
 void navigationTask(void *pv) {
+    while (!gcodeReady) vTaskDelay(pdMS_TO_TICKS(100));
+
     enum State {
         ROTATE_TO_GOAL = 0,
         DRIVE_TO_GOAL = 1,
@@ -634,6 +658,7 @@ void navigationTask(void *pv) {
     unsigned long stateChangeResetTime = millis();
 
     for (;;) {
+        // xSemaphoreTake(ExecuteGearSemaphore, portMAX_DELAY);
         unsigned long currentTime = millis();
         
         // Detect rapid state oscillation
@@ -663,7 +688,7 @@ void navigationTask(void *pv) {
 
         // Prevent state changes too quickly (hysteresis)
         bool canChangeState = (currentTime - lastStateChange) > MIN_STATE_TIME;
-
+        // ws.textAll(currentState);
         switch (currentState) {
             
             // ===== STATE 0: ROTATE TO FACE GOAL =====
@@ -675,8 +700,8 @@ void navigationTask(void *pv) {
                 const double ROTATION_DRIFT_TOLERANCE = 0.08; // Increased from 0.05
                 
                 if (currentTime - lastPrintTime > PRINT_INTERVAL) {
-                    // Serial.printf("[ROTATE_TO_GOAL] Heading: %.1f° | Pos drift: %.3fm | Can transition: %s\n", 
-                    //              headingError * 180.0 / M_PI, rho, canChangeState ? "YES" : "NO");
+                    Serial.printf("[ROTATE_TO_GOAL] Heading: %.1f° | Pos drift: %.3fm | Can transition: %s\n", 
+                                 headingError * 180.0 / M_PI, rho, canChangeState ? "YES" : "NO");
                     lastPrintTime = currentTime;
                 }
                 
@@ -689,6 +714,7 @@ void navigationTask(void *pv) {
                         lastStateChange = currentTime;
                         stateChangeCounter++;
                         Serial.println("✓ Aligned to goal! Starting drive...");
+                        ws.textAll("✓ Aligned to goal! Starting drive...");
                     }
                 } else {
                     stateChangeTime = currentTime;
@@ -703,6 +729,9 @@ void navigationTask(void *pv) {
                     Serial.printf("⚠️ SEVERE DRIFT: %.1f° → Re-rotating (after %.1fs in DRIVE)\n", 
                                  headingError * 180.0 / M_PI, 
                                  (currentTime - lastStateChange) / 1000.0);
+                    // // ws.textAll("⚠️ SEVERE DRIFT: %.1f° → Re-rotating (after %.1fs in DRIVE)\n", 
+                    // headingError * 180.0 / M_PI, 
+                    // (currentTime - lastStateChange) / 1000.0);
                     currentState = ROTATE_TO_GOAL;
                     currentNavState = (int)currentState;
                     stateChangeTime = currentTime;
@@ -727,6 +756,9 @@ void navigationTask(void *pv) {
                         Serial.printf("[DRIVE] Correcting drift: %.1f° | Speed: %.0f%% | Time in state: %.1fs\n",
                                      headingError * 180.0 / M_PI, speedScale * 100,
                                      (currentTime - lastStateChange) / 1000.0);
+                        // ws.textAll("[DRIVE] Correcting drift: %.1f° | Speed: %.0f%% | Time in state: %.1fs\n",
+                        // headingError * 180.0 / M_PI, speedScale * 100,
+                        // (currentTime - lastStateChange) / 1000.0);
                         lastPrintTime = currentTime;
                     }
                 }
@@ -734,6 +766,7 @@ void navigationTask(void *pv) {
                 if (currentTime - lastPrintTime > PRINT_INTERVAL) {
                     Serial.printf("[DRIVE_TO_GOAL] Distance: %.4fm | Heading: %.1f°\n", 
                                  rho, headingError * 180.0 / M_PI);
+                    // ws.textAll("[DRIVE TO GOAL] DISTANCE: " + String(rho) + " Heading: "+String(headingError*180.0 / M_PI));
                     lastPrintTime = currentTime;
                 }
                 
@@ -745,6 +778,7 @@ void navigationTask(void *pv) {
                         stateChangeTime = currentTime;
                         lastStateChange = currentTime;
                         Serial.println("✓ Position reached! Rotating to final angle...");
+                        // ws.textAll("✓ Position reached! Rotating to final angle...");
                     }
                 } else {
                     stateChangeTime = currentTime;
@@ -759,7 +793,7 @@ void navigationTask(void *pv) {
                 
                 const double FINAL_ROTATION_DRIFT_TOLERANCE = 0.03; // Increased from 0.02
                 if (rho > FINAL_ROTATION_DRIFT_TOLERANCE && canChangeState) {
-                    Serial.printf("⚠️ Position drift: %.3fm → Re-approaching\n", rho);
+                    // ws.textAll("⚠️ Position drift: " + rho + " → Re-approaching\n");
                     currentState = ROTATE_TO_GOAL;
                     currentNavState = (int)currentState;
                     stateChangeTime = currentTime;
@@ -770,6 +804,7 @@ void navigationTask(void *pv) {
                 if (currentTime - lastPrintTime > PRINT_INTERVAL) {
                     Serial.printf("[ROTATE_TO_FINAL] Angle: %.1f° | Pos drift: %.4fm\n", 
                                  finalAngleError * 180.0 / M_PI, rho);
+                    // ws.textAll("ROTATE_TO_FINAL] Angle: " + String(finalAngleError*180.0/M_PI + " Pos drift: " + rho));
                     lastPrintTime = currentTime;
                 }
                 
@@ -780,6 +815,7 @@ void navigationTask(void *pv) {
                         stateChangeTime = currentTime;
                         lastStateChange = currentTime;
                         Serial.println("✓✓✓ GOAL REACHED! ✓✓✓");
+                        ws.textAll("✓✓ GOAL REACHED! ✓✓✓");
                     }
                 } else {
                     stateChangeTime = currentTime;
@@ -810,6 +846,7 @@ void navigationTask(void *pv) {
                     stateChangeTime = currentTime;
                     lastStateChange = currentTime;
                 }
+                handleGoalReached();
                 break;
             }
         }
@@ -845,15 +882,15 @@ void navigationTask(void *pv) {
     
         String posMsg = "POSITION x=" + String(x, 3) + " y=" + String(y, 3) + 
                     " theta=" + String(theta * 180.0 / M_PI, 1);
-      ws.textAll(posMsg);
+     ws.textAll(posMsg);
       
       // Send target
       String targetMsg = "TARGET x=" + String(x_s, 3) + " y=" + String(y_s, 3) + 
                         " theta=" + String(theta_s * 180.0 / M_PI, 1);
-      ws.textAll(targetMsg);
+     ws.textAll(targetMsg);
       
       // Send nav state
-      ws.textAll("NAV_STATE " + String(currentNavState));
+     ws.textAll("NAV_STATE " + String(currentNavState));
   }
 }
 
@@ -906,10 +943,9 @@ void setup() {
   poseMutex = xSemaphoreCreateMutex();
   printMutex = xSemaphoreCreateMutex();
   CameraUpdatedSemaphore = xSemaphoreCreateBinary();
-  ExecuteGearSemaphore = xSemaphoreCreateBinary();
+  // ExecuteGearSemaphore = xSemaphoreCreateBinary();
+
   ExecuteStepperSemaphore = xSemaphoreCreateBinary();
-  // battery
-  ws.textAll("BATTERY_STATUS " + String(getBatteryPercentage()) + "%");
   if (!poseMutex || !printMutex || !CameraUpdatedSemaphore) {
     Serial.println("❌ Semaphore creation failed!");
     while(1) delay(1000);
@@ -934,16 +970,16 @@ void setup() {
   Serial.println("Starting tasks...");
   delay(2000);
   
-  xTaskCreatePinnedToCore(encoderTask, "Encoders", 4096, NULL, 2, NULL, 1);
-  xTaskCreatePinnedToCore(pidTask, "PID", 4096, NULL, 2, NULL, 1);
-  xTaskCreatePinnedToCore(stepperTask, "Stepper", 4096, NULL, 2, NULL, 0);
-  xTaskCreatePinnedToCore(velocityTask, "Velocity", 4096, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(navigationTask, "Nav", 4096, NULL, 2, NULL, 1);
-  xTaskCreatePinnedToCore(SerialCommandTask, "Serial", 4096, NULL, 2, NULL, 1);
-  xTaskCreatePinnedToCore(TaskGcodeParse, "GcodeParse", 4096, NULL, 2, NULL, 1);
-  xTaskCreatePinnedToCore(TaskGcodeExec, "GcodeExec", 4096, NULL, 2, NULL, 1);
-  xTaskCreatePinnedToCore(TaskStepperGcodeExec, "StepperExec", 4096, NULL, 1, NULL, 0);
-  xTaskCreatePinnedToCore(TaskWebServer, "WebServer", 8192, NULL, 1, &taskWeb, 1);
+  xTaskCreatePinnedToCore(encoderTask, "Encoders", 4096, NULL, 3, NULL, 1);               // priority of 2
+  xTaskCreatePinnedToCore(pidTask, "PID", 4096, NULL, 2, NULL, 1);                        // priority of 2
+  // xTaskCreatePinnedToCore(stepperTask, "Stepper", 4096, NULL, 1, NULL, 0);                // priority of 1
+  xTaskCreatePinnedToCore(velocityTask, "Velocity", 4096, NULL, 1, NULL, 0);              // priority of 1
+  xTaskCreatePinnedToCore(navigationTask, "Nav", 4096, NULL, 2, NULL, 1);                 // priority of 1
+  // xTaskCreatePinnedToCore(SerialCommandTask, "Serial", 4096, NULL, 2, NULL, 1);
+  xTaskCreatePinnedToCore(TaskGcodeParse, "GcodeParse", 4096, NULL, 2, &task_gcode_parse, 1);          // priority of 2
+  xTaskCreatePinnedToCore(TaskGcodeExec, "GcodeExec", 4096, NULL, 2, NULL, 1);            // priority of 2
+  // xTaskCreatePinnedToCore(TaskStepperGcodeExec, "StepperExec", 4096, NULL, 2, NULL, 0);   // priority of 2
+  xTaskCreatePinnedToCore(TaskWebServer, "WebServer", 8192, NULL, 3, &taskWeb, 1);        // priority of 3
   
   Serial.println("✅ All tasks started!");
 }

@@ -1,24 +1,29 @@
 // ==== LIBRARIES =====
 #include "pid.h"
 
+// ====== encoder PINS ======
+#define ENC_R_A 18
+#define ENC_R_B 8
+#define ENC_L_A 40
+#define ENC_L_B 39
+
 // ====== L298N MOTOR PINS ======
-#define ENA_L 5
-#define IN1_L 6
-#define IN2_L 7
-#define ENB_R 8
-#define IN3_R 9
-#define IN4_R 10
-
-// ===== MOTOR SETUP =====
+#define IN1_R 16
+#define IN2_R 17
+#define IN3_L 41
+#define IN4_L 42
+// ====== MOTOR SETUP ======
 void setupMotors() {
-  pinMode(IN1_L, OUTPUT);
-  pinMode(IN2_L, OUTPUT);
-  pinMode(IN3_R, OUTPUT);
-  pinMode(IN4_R, OUTPUT);
+  pinMode(IN1_R, OUTPUT);
+  pinMode(IN2_R, OUTPUT);
+  pinMode(IN3_L, OUTPUT);
+  pinMode(IN4_L, OUTPUT);
 
-  ledcAttach(ENA_L, 5000, 8);
-  ledcAttach(ENB_R, 5000, 8);
-} // ..setupMotors()
+  ledcAttach(IN1_R, 10000, 8);
+  ledcAttach(IN2_R, 10000, 8);
+  ledcAttach(IN3_L, 10000, 8);
+  ledcAttach(IN4_L, 10000, 8);
+}
 
 int remapPID(double pidOutput, bool rotatingInPlace) {
   const int MIN_PWM = 140;
@@ -45,21 +50,17 @@ void motorWrite(bool left, int pwmVal) {
   int pwm = constrain(abs(pwmVal), 0, 255);
 
   if (left) {
-    digitalWrite(IN1_L, fwd ? HIGH : LOW);   
-    digitalWrite(IN2_L, fwd ? LOW : HIGH);   
-    ledcWrite(ENA_L, pwm);
+    ledcWrite(IN3_L, fwd ? 0 : pwm);   // reverse
+    ledcWrite(IN4_L, fwd ? pwm : 0);   // forward
   } else {
-    digitalWrite(IN3_R, fwd ? HIGH : LOW);   
-    digitalWrite(IN4_R, fwd ? LOW : HIGH);   
-    ledcWrite(ENB_R, pwm);
+    ledcWrite(IN1_R, fwd ? pwm : 0);
+    ledcWrite(IN2_R, fwd ? 0 : pwm);
   }
-} // ..motorWrite()
+}
 
 void stopMotors() {
-  ledcWrite(ENA_L, 0);
-  ledcWrite(ENB_R, 0);
-  digitalWrite(IN1_L, LOW);
-  digitalWrite(IN2_L, LOW);
-  digitalWrite(IN3_R, LOW);
-  digitalWrite(IN4_R, LOW);
-} // ..stopMotors()
+    ledcWrite(IN1_R, 255);
+    ledcWrite(IN2_R, 255);
+    ledcWrite(IN3_L, 255);
+    ledcWrite(IN4_L, 255);
+}
