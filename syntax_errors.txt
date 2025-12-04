@@ -1,0 +1,9 @@
+/Users/shrutishah/Documents/Arduino/esp32_webserver/main.ino: In function 'void TaskGcodeExec(void*)':
+/Users/shrutishah/Documents/Arduino/esp32_webserver/main.ino:444:9: error: 'xStepperStatus' was not declared in this scope; did you mean 'xGearStatus'?
+  444 |         xStepperStatus=xQueueReceive(queStepper, &receivedGear_cmd, xTicksToWait);
+      |         ^~~~~~~~~~~~~~
+      |         xGearStatus
+
+exit status 1
+
+Compilation error: 'xStepperStatus' was not declared in this scope; did you mean 'xGearStatus'?
