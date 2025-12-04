@@ -31,7 +31,8 @@ void GANTRY::moveRight(float distance, float speed) {
   // gantry.wakup();
   
   // set direction to be clockwise (moving right)
-  gantry.setDirection(DRV8825_CLOCK_WISE);
+  // gantry.setDirection(DRV8825_CLOCK_WISE);
+  digitalWrite(DIR, HIGH);
 
   // Calculate number of steps
   int num_steps = distance/step_dist;
@@ -41,15 +42,16 @@ void GANTRY::moveRight(float distance, float speed) {
 
   // Serial.println("Moving gantry arm right!");
   for (int i = 0; i < num_steps; i++) {
-    gantry.step();
+    // gantry.step();
+    // delay(wait);
+    digitalWrite(STEP, HIGH);
+    delay(wait);
+    digitalWrite(STEP, LOW);
     delay(wait);
   } // for ..move number of required steps
 
   // add a little bit of delay to separate commands
   delay(waitTime);
-
-  // regrip marker (could've gotten loose)
-  grab();
   
   // update position value
   if (position + distance <= BELT_LENGTH) {
@@ -68,7 +70,8 @@ void GANTRY::moveLeft(float distance, float speed) {
   // gantry.wakup();
 
   // set direction to be counterclockwise (moving left)
-  gantry.setDirection(DRV8825_COUNTERCLOCK_WISE);
+  // gantry.setDirection(DRV8825_COUNTER_CLOCK_WISE);
+  digitalWrite(DIR, LOW);
 
   // Calculate number of steps
   int num_steps = distance/step_dist;
@@ -78,7 +81,11 @@ void GANTRY::moveLeft(float distance, float speed) {
 
   // Serial.println("Moving gantry arm left!");
   for (int i = 0; i < num_steps; i++) {
-    gantry.step();
+    // gantry.step();
+    // delay(wait);
+    digitalWrite(STEP, HIGH);
+    delay(wait);
+    digitalWrite(STEP, LOW);
     delay(wait);
   } // for ..move number of required steps
   
@@ -87,9 +94,6 @@ void GANTRY::moveLeft(float distance, float speed) {
   
   // add a little bit of delay to separate commands
   delay(waitTime);
-
-  // regrip marker (could've gotten loose)
-  grab();
 
   // update position value
   if (position - distance >= 0) {
@@ -170,16 +174,23 @@ void GANTRY::release() {
 // CALL THIS FUNCTION IN SETUP LOOP!
 void GANTRY::init() {
   // start gantry belt stepper motor
-  gantry.begin(DIR, STEP, EN, RST, SLP); // DIR, STEP, EN, RST, SLP
-  gantry.setDirection(DRV8825_CLOCK_WISE);
+  // gantry.begin(DIR, STEP, EN, RST, SLP); // DIR, STEP, EN, RST, SLP
+  // gantry.setDirection(DRV8825_CLOCK_WISE);
+  pinMode(DIR, OUTPUT);
+  pinMode(STEP, OUTPUT);
+  pinMode(EN, OUTPUT);
+  pinMode(RST, OUTPUT);
+  pinMode(SLP, OUTPUT);
 
   // SET PINS TO DEFAULT STATE
+  digitalWrite(DIR, HIGH);
+  digitalWrite(STEP, LOW);
   digitalWrite(EN, LOW);
   digitalWrite(RST, HIGH);
   digitalWrite(SLP, HIGH);
 
   // check reset pin - most important
-  if (!gantry.reset()) {
+  if (!digitalRead(RST)) { // !gantry.reset()
     Serial.println("ERROR: RESET pin not set to HIGH!");
     exit(1);
   }
@@ -224,15 +235,19 @@ void GANTRY::resetPos(int orientation) {
 // gantry moves to an "absolute" position that it needs to move to
 void GANTRY::move(float pos, float speed) {
   // figure out where marker needs to move to
-  float moving = position - pos;
+  float moving = pos - position;
 
   // if moving is positive, move to the left
   if (moving > 0) {
+    Serial.print("MOVING TO THE LEFT BY ");
+    Serial.println(moving);
     moveLeft(moving, speed);
   } // if ..moveLeft
 
   // else moving is negative, move to the right
   else if (moving < 0) {
+    Serial.print("MOVING TO THE RIGHT BY ");
+    Serial.println(moving);
     moveRight(abs(moving), speed);
   } // else ..moveRight
 } // ..move()
