@@ -11,9 +11,9 @@ from ocr import *
 
 
 # Setup directories
-input_folder = "../color_img"
-output_folder = "../color_output"
-src_file = "215notes.png"
+input_folder = "../data"
+output_folder = "../output"
+src_file = "rect.png"
 gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode"    # stepper motor commands 
 gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode"    # gear motor commands
 gcode_file3 = src_file.rsplit('.',1)[0] + "3.gcode"     # for plotting
@@ -42,16 +42,13 @@ color2 = 'purple'
 color3 = 'green'
 
 
-# user defines the boundary of drawing, needs to leave margin for aruco tags in the whiteboard corners 
-drawing_corners = [
-    [0,20],        # top left corner
-    [0,1020],       # bottom left corner
-    [1000,20]       # top right corner
-]
+# user defines the top left boundary of drawing, needs to leave margin for aruco tags in the whiteboard corners 
+origin = [0,0]       # top left corner
+
 
 # user configurable drawing dimensions in mm
-WIDTH_MM = drawing_corners[2][0] - drawing_corners[0][0]
-HEIGHT_MM = drawing_corners[1][1] - drawing_corners[0][1]
+WIDTH_MM = 1000
+HEIGHT_MM = 1000
 
 
 class GcodeConverter:
@@ -66,8 +63,8 @@ class GcodeConverter:
 
         # user configurable parameters
         self.isDigital = True           # true if input image is digital, False if photo
-        self.WIDTH_MM =  drawing_corners[2][0] - drawing_corners[0][0]
-        self.HEIGHT_MM = drawing_corners[1][1] - drawing_corners[0][1]
+        self.WIDTH_MM =  WIDTH_MM
+        self.HEIGHT_MM = HEIGHT_MM
         self.DEFAULT_COLOR = 'pink'     # default color for undefined colors
 
         self.digital_colors = {
@@ -101,9 +98,6 @@ class GcodeConverter:
 
         
         
-
-
-   
     def preprocess_photo(self, image_path):
         """resize, clean, and skeletonize the image"""
         org_img = cv2.imread(image_path)
@@ -275,7 +269,9 @@ class GcodeConverter:
         # sort all paths 
         prevRow_x = 0
         sorted_contours = []
-        for row_num, row_contours in enumerate(contours_data):
+       # for row_num, row_contours in enumerate(contours_data):
+        for row_num, row_contours in reversed(list(enumerate(contours_data))):
+
             if (len(row_contours) > 0) :
 
                 # determine row direction based on previous row's endpoint
@@ -669,28 +665,43 @@ class GcodeConverter:
 
                 if len(points) < 2:
                     continue
+
+                points_gear = points.copy()
+                points_gear[:, 0] += origin[0]   # add x offset 
+                points_gear[:, 1] += origin[1]   # add y offset
    
                 # find which row the contour belongs to
                 _, y, _, _ = cv2.boundingRect(contour)
                 row = y // self.RowHeight    # 0 indexed rows
 
-                if row != current_row:
-                    # tell gear motor to move to next row's first point
-                    f2.write(f"D{(row - current_row)*self.RowHeight}\n")    # GO DOWN by # of points
+                if (i==0):
                     current_row = row
 
+
+                if row != current_row and i != 0: # new row!
+                    # same x coord, turn 90 degres to climb up
+                    f2.write(f"G0 X{prev_point[0]:.2f} Y0 A90\n")
+
+                    # move up straight to get into next row
+                    f2.write(f"G0 X{prev_point[0]:.2f} Y{(current_row-row)*self.RowHeight:.2f} A0\n")
+
+                    # adjust orientation to be facing right
+                    f2.write(f"G0 X{prev_point[0]:.2f} Y0 A-90\n")
+                    current_row = row
+                else: # stays in the same row, no y movement
+                    f2.write(f"G0 X{points_gear[0][0]:.2f} Y0\n")
+
+                
                 # resets direction at the start of every contour by looking at first two points
                 if (points[1][0] >= points[0][0]):
                     LtoR = True
                 else:
                     LtoR = False
-        
-                points_gear = points.copy()
-                points_gear[:, 0] += drawing_corners[0][0]   # add x offset 
-                points_gear[:, 1] += drawing_corners[0][1]   # add y offset
+
+
 
                 points_stepper = points.copy()
-                points_stepper[:,0] += drawing_corners[0][0] # add x offset
+                points_stepper[:,0] += origin[0] # add x offset
                 points_stepper[:,1] -= row*self.RowHeight    # y offset is relative positions in [0,RowHeight]
 
                 # sends color command if color changes
@@ -698,9 +709,10 @@ class GcodeConverter:
                     f2.write(f"Color {self.draw_positions[color]}\n")
                     current_color = color
 
+                angle = 0 if LtoR else 180
+
                 # Move to first point (marker up)
                 f1.write(f"G0 X{points_stepper[0][0]:.2f} Y{points_stepper[0][1]:.2f}\n")
-                f2.write(f"G0 X{points_gear[0][0]:.2f} Y{points_gear[0][1]:.2f}\n")
                 f3.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
 
                 f3.write(f"Color {color}\n")
@@ -717,43 +729,77 @@ class GcodeConverter:
                     f1.write(f"G1 X{points_stepper[i+1][0]:.2f} Y{points_stepper[i+1][1]:.2f}\n")
 
                     if abs(point[0] - prev_point[0]) < 0.01:
-                        f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
+                        f2.write(f"G1 X{prev_point[0]:.2f} Y0\n")
                         f1.write("B\n")
 
                     else:
                         if LtoR:
                             if point[0] - prev_point[0] < 0:
                                 LtoR = False  # backpass, add to gear motor command
-                                f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
+                                f2.write(f"G1 X{prev_point[0]:.2f} Y0\n")
                                 f1.write("B\n")
                             # else: keep traversing through the points
                         else: 
                             if (point[0]-prev_point[0]) > 0:
                                 LtoR = True
                                 f1.write("B\n")
-                                f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
+                                f2.write(f"G1 X{prev_point[0]:.2f} Y0\n")
 
                     prev_point = point
                                 
                 # add last point
-                f2.write(f"G1 X{points_gear[-1][0]:.2f} Y{points_gear[-1][1]:.2f}\n")
+                f2.write(f"G1 X{points_gear[-1][0]:.2f} Y0\n")
                 f1.write(f"G1 X{points_stepper[-1][0]:.2f} Y{points_stepper[-1][1]:.2f}\n")
                 f1.write("B\n")
                 prev_point = points_gear[-1]
 
-                f1.write("\n")
-                f2.write("\n")
                 f3.write("\n")
 
             f1.write("M30\n")      # end of drawing, program completes
             f2.write("M30\n") 
-            f3.write("M30\n")     
+            f3.write("M30\n") 
 
-
-        print(f"G-code successfully written to {output_file1}, {output_file2}, and {output_file3}")
         f1.close()
         f2.close()
         f3.close()
+
+        # add angle commands for gear motor
+        with open(output_file2, 'r') as f2:
+            lines = f2.readlines()
+
+        with open(output_file2, 'w') as f2:            
+            for i in range(0, len(lines)):
+                line1 = lines[i].rstrip('\n') 
+
+                if ((line1.startswith('G0') or line1.startswith('G1')) and ('A' not in line1)):
+                    x1_match = re.search(r'X([-\d.]+)', line1)
+                    # parse through next lines for G0/G1
+                    foundnext = False
+                    for j in range(i + 1, len(lines)):
+                        line2 = lines[j].rstrip('\n')
+                        # compute angle for line1 command
+                        if (line2.startswith('G0') or line2.startswith('G1') and ('A' not in line2)):
+                            x2_match = re.search(r'X([-\d.]+)', line2)
+                            if x2_match and x1_match:
+                                x2 = float(x2_match.group(1))
+                                x1 = float(x1_match.group(1))
+                                # LtoR: 0, RtoL: 180
+                                if (x2>=x1):
+                                    line1 = line1 + ' A0'
+                                else:
+                                    line1 = line1  + ' A180'
+                                    foundnext = True
+                                break
+                    # for the case when it's changing row or at last point
+                    if (not foundnext):
+                        line1 = line1 + ' A0'
+
+                f2.write(line1 + '\n')
+        f2.close()
+
+
+        print(f"G-code successfully written to {output_file1}, {output_file2}, and {output_file3}")
+
         return output_file1, output_file2, output_file3
 
     
