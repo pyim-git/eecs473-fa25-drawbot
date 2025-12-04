@@ -28,8 +28,9 @@ brown_select = 'brown'
 yellow_select = 'yellow'
 #3 pixels = 1 mm
 
+
 class GcodeConverter:
-    def __init__(self, width_mm, height_mm, image_type, color_map):
+    def __init__(self, width_mm, height_mm, image_type, color_map, top_left_x=0, top_left_y=0):
         self.POSITION = "G0" # robot positioning to starting point (fastest speed)
         self.TRACE = "G1"    # robot tracing a path to next point (slower speed)
 
@@ -42,33 +43,25 @@ class GcodeConverter:
         self.isDigital = (image_type.lower() == 'digital')
         self.WIDTH_MM = width_mm
         self.HEIGHT_MM = height_mm
+        self.top_left_x = top_left_x
+        self.top_left_y = top_left_y
         # user configurable default color for undetected colors
         self.digital_colors = color_map
         self.photo_colors = color_map
         self.digital_colors['gray'] = color_map['black']
-        # self.digital_colors = {
-        #     'black': black_select,
-        #     'blue': blue_select,
-        #     'red': red_select,
-        #     'green': green_select,
-        #     'purple': purple_select,
-        #     'orange': orange_select,
-        #     'brown': brown_select,
-        #     'yellow': yellow_select,
-        #     'gray': black_select
-        # }
-
-        # self.photo_colors = {
-        #     'black': black_select,
-        #     'blue': blue_select,
-        #     'red': red_select,
-        #     'green': green_select,
-        #     'purple': purple_select,
-        #     'orange': orange_select,
-        #     'brown': brown_select,
-        #     'yellow': yellow_select
-        # }
-   
+         # user configurable robot drawing colors with corresponding marker positions
+        color_set = set()
+        for dig_color in self.digital_colors:
+            color_set.add(self.digital_colors[dig_color])
+        color_set = list(color_set)
+        color1 = color_set[0]
+        color2 = color_set[1]
+        color3 = color_set[2]
+        self.draw_positions = {
+            color1: 1,
+            color2: 2,
+            color3: 3
+        }
     
     def preprocess_photo(self, image_path):
         """resize, clean, and skeletonize the image"""
@@ -100,8 +93,7 @@ class GcodeConverter:
         skeleton = cv2.ximgproc.thinning(cleaned.astype(np.uint8), 
                                     thinningType=cv2.ximgproc.THINNING_ZHANGSUEN)
         return skeleton, cleaned, org_img
-
-   
+ 
     def preprocess_digital(self, image_path):
         """resize, clean, and skeletonize the image"""
         org_img = cv2.imread(image_path)
@@ -560,21 +552,23 @@ class GcodeConverter:
             contours[i]['contour'] = points.reshape(-1, 1, 2) 
         return contours
    
-    def image_to_gcode(self, image_path, output_file1, output_file2):
+    def image_to_gcode(self, image_path, output_file1, output_file2, output_file3):
         """write gcode to output file"""
+        # detected_words = detect_text(image_path)
+        # image_with_text = transpose_print_text_to_image(detected_words, image_path)
+        # image_text_path = image_path+"_text_overlay.png"
+        # cv2.imwrite(image_text_path, image_with_text)
         # process the image to get clean contours
+
+      #  image_text_path = image_path
+
+        # process the image and get a binary, skeletonized image
         if self.isDigital:
-            print("Running OCR for digital image")
-            detected_words = detect_text(image_path, self.WIDTH_MM, self.HEIGHT_MM)
-            print("found words")
-            image_text_path = transpose_print_text_to_image(detected_words, image_path)
-            skeleton_img, binary, org_img = self.preprocess_digital(image_text_path)
-            org_img = cv2.imread(image_path)
-            org_img = cv2.resize(org_img, (self.WIDTH_MM, self.HEIGHT_MM))
+            skeleton_img, binary, org_img= self.preprocess_digital(image_path)
         else:
-            print("Processing photo image")
             skeleton_img, binary, org_img = self.preprocess_photo(image_path)
-        # Find contours using RETR_TREE (detects nested contours)
+
+
         # Find contours using RETR_TREE (detects nested contours)
         skeleton_contours, _ = cv2.findContours(skeleton_img, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
     
@@ -614,8 +608,8 @@ class GcodeConverter:
         sorted_contours = self.sort_split_contours(split_contours)
 
 
-        # Open file for writing: file1 for absolute positions, file2 for gear motor commands
-        with open(output_file1, 'w') as f1, open(output_file2, 'w') as f2:
+        # Open file for writing: file1 for stepper commands, file2 for gear commands, file 3 for plotting
+        with open(output_file1, 'w') as f1, open(output_file2, 'w') as f2, open (output_file3,'w') as f3:
             # initial conditions
             current_row = 0 
             LtoR = True
@@ -637,7 +631,7 @@ class GcodeConverter:
 
                 if row != current_row:
                     # tell gear motor to move to next row's first point
-                    f2.write(f"D{row - current_row}\n")    # GO DOWN by # of rows
+                    f2.write(f"D{(row - current_row)*self.RowHeight}\n")    # GO DOWN by # of points
                     current_row = row
 
                 # resets direction at the start of every contour by looking at first two points
@@ -646,90 +640,99 @@ class GcodeConverter:
                 else:
                     LtoR = False
         
+                points_gear = points.copy()
+                points_gear[:, 0] += self.top_left_x
+                points_gear[:, 1] += self.top_left_y
 
-                # Move to first point (marker up)
-                f1.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
-                f2.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
+                points_stepper = points.copy()
+                points_stepper[:,0] += self.top_left_x
+                points_stepper[:,1] -= row*self.RowHeight    # y offset is relative positions in [0,RowHeight]
 
                 # sends color command if color changes
                 if (current_color != color):
-                    f1.write(f"Color {color}\n")
-                    f2.write(f"Color {color}\n")
+                    f2.write(f"Color {self.draw_positions[color]}\n")
                     current_color = color
 
-                # write second point for stepper motor command
-                f1.write(f"G1 X{points[1][0]:.2f} Y{points[1][1]:.2f}\n")
-                prev_point = points[1]
+                # Move to first point (marker up)
+                f1.write(f"G0 X{points_stepper[0][0]:.2f} Y{points_stepper[0][1]:.2f}\n")
+                f2.write(f"G0 X{points_gear[0][0]:.2f} Y{points_gear[0][1]:.2f}\n")
+                f3.write(f"G0 X{points[0][0]:.2f} Y{points[0][1]:.2f}\n")
 
+                f3.write(f"Color {color}\n")
+
+                # for plotting original points
+                for point in points[1:]:
+                    f3.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
+
+                prev_point = points_gear[1]
 
                 # Marker down, draw the contour
-                for point in points[2:]:
-                    f1.write(f"G1 X{point[0]:.2f} Y{point[1]:.2f}\n")
-
+                for i, point in enumerate(points_gear[2:]):
                     # check if from current point to next point is in the same direction as the current direction
-                    if abs(point[0] -prev_point[0]) < 0.01:
+                    f1.write(f"G1 X{points_stepper[i+1][0]:.2f} Y{points_stepper[i+1][1]:.2f}\n")
+
+                    if abs(point[0] - prev_point[0]) < 0.01:
                         f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
+                        f1.write("B\n")
+
                     else:
                         if LtoR:
                             if point[0] - prev_point[0] < 0:
                                 LtoR = False  # backpass, add to gear motor command
                                 f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
+                                f1.write("B\n")
                             # else: keep traversing through the points
                         else: 
                             if (point[0]-prev_point[0]) > 0:
                                 LtoR = True
+                                f1.write("B\n")
                                 f2.write(f"G1 X{prev_point[0]:.2f} Y{prev_point[1]:.2f}\n")
-
-                    prev_point = point
-                
+                    prev_point = point               
                 # add last point
-                f2.write(f"G1 X{points[-1][0]:.2f} Y{points[-1][1]:.2f}\n")
-                prev_point = points[-1]
-        
-                f2.write("\n")
+                f2.write(f"G1 X{points_gear[-1][0]:.2f} Y{points_gear[-1][1]:.2f}\n")
+                f1.write(f"G1 X{points_stepper[-1][0]:.2f} Y{points_stepper[-1][1]:.2f}\n")
+                f1.write("B\n")
+                prev_point = points_gear[-1]
                 f1.write("\n")
-
+                f2.write("\n")
+                f3.write("\n")
             f1.write("M30\n")      # end of drawing, program completes
-            f2.write("M30\n")      
+            f2.write("M30\n") 
+            f3.write("M30\n")     
 
-
-        print(f"G-code successfully written to {output_file1} and {output_file2}")
+        print(f"G-code successfully written to {output_file1}, {output_file2}, and {output_file3}")
         f1.close()
         f2.close()
-        return output_file1, output_file2
+        f3.close()
+        return output_file1, output_file2, output_file3
     
-
-
 def main():
     input_folder = "backend/uploads"
     output_folder = "backend/color_output"
-    src_file = "robo.png"
+    src_file = "rectangle.png"
     gcode_file1 = src_file.rsplit('.', 1)[0] + "1.gcode" #stepper motor commands
     gcode_file2 = src_file.rsplit('.', 1)[0] + "2.gcode" #gear motor commands
+    gcode_file3 = src_file.rsplit('.', 1)[0] + "3.gcode" #gear motor commands
     gcode_plotfile = src_file.rsplit('.', 1)[0] + ".png"
     color_map = {
-        'black': black_select,
-        'blue': blue_select,
-        'red': red_select,
-        'green': green_select,
-        'purple': purple_select,
-        'orange': orange_select,
-        'brown': brown_select,
-        'yellow': yellow_select
+        'black': 'black',
+        'blue': 'blue',
+        'red': 'black',
+        'green': 'blue',
+        'purple': 'black',
+        'orange': 'blue',
+        'brown': 'red',
+        'yellow': 'red'
     }
 
     if not os.path.exists(output_folder):
         os.makedirs(output_folder)
-    converter = GcodeConverter(1500, 1500, 'photo', color_map)
+    converter = GcodeConverter(1100, 525, 'photo', color_map)
     # try:
     image_path = f"{input_folder}/{src_file}" 
-    output_file1, output_file2 = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file1}", f"{output_folder}/{gcode_file2}" )
+    output_file1, output_file2, output_file3 = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file1}", f"{output_folder}/{gcode_file2}", f"{output_folder}/{gcode_file3}" )
     print(f"G-code saved to: {output_file1} and {output_file2}")
-    visualize_gcode(output_file1, f"{output_folder}", gcode_plotfile, 1500, 1500)
-
-    # except Exception as e:
-    #     print(f"Error with custom image: {e}")
-
+    visualize_gcode(output_file3, f"{output_folder}", gcode_plotfile, 1100, 525)
 
 if __name__ == "__main__":
     main()

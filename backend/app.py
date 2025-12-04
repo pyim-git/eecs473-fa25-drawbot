@@ -18,7 +18,7 @@ from flask_cors import CORS
 import os
 from werkzeug.utils import secure_filename
 from driver import *
-from robot_detection import generate_frames, get_robo_loc
+from robot_detection import *
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for browser requests
@@ -27,6 +27,7 @@ CORS(app)  # Enable CORS for browser requests
 UPLOAD_FOLDER = 'backend/uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+detector = Aruco()
 
 def process_image(image_path, name, image_type, width_mm, height_mm, color_mappings):
     """
@@ -53,12 +54,13 @@ def process_image(image_path, name, image_type, width_mm, height_mm, color_mappi
     output_folder = "backend/color_output"
     gcode_file1 = name+ "1.gcode" #stepper motor commands
     gcode_file2 = name+ "2.gcode" #gear motor commands
+    gcode_file3 = name + "3.gcode"     # for plotting
     gcode_plotfile = name+ ".png"
     print(f"{output_folder}/{gcode_file1}")
-    output_file1, output_file2 = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file1}", f"{output_folder}/{gcode_file2}" )
+    output_file1, output_file2, output_file3 = converter.image_to_gcode(image_path, f"{output_folder}/{gcode_file1}", f"{output_folder}/{gcode_file2}", f"{output_folder}/{gcode_file3}")
     print(f"G-code saved to: {output_file1} and {output_file2}")
     print(f"G-code figure saved to: ", f"{output_folder}/{gcode_plotfile}")
-    visualize_gcode(output_file1, f"{output_folder}", gcode_plotfile, width_mm, height_mm)
+    visualize_gcode(output_file3, f"{output_folder}", gcode_plotfile, width_mm, height_mm)
     file_size = os.path.getsize(image_path)
     
     return {
@@ -81,6 +83,8 @@ def process():
         image_type = request.form.get('imageType')
         width_mm = request.form.get('widthMM')
         height_mm = request.form.get('heightMM')
+        top_left_x = request.form.get('top_left_x')
+        top_left_y = request.form.get('top_left_y')
         print(f"Processing image: {name}, {image_type}, {width_mm}, {height_mm}")
         markerColor = None
         color_mappings = dict()
@@ -92,6 +96,7 @@ def process():
                 color_mappings[image_color] = markerColor
             print(color_mappings)
         print(color_mappings)
+
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
@@ -103,7 +108,7 @@ def process():
         file.save(filepath)
         
         # Process the image
-        result = process_image(filepath, name, image_type, int(width_mm), int(height_mm), color_mappings)
+        result = process_image(filepath, name, image_type, int(width_mm), int(height_mm), color_mappings, int(top_left_x), int(top_left_y))
         
         return jsonify(result), 200
         
@@ -167,6 +172,28 @@ def get_robo_pos():
     Return current robot position {'x': x, 'y': y}
     """
     return get_robo_loc()
+
+@app.route('/configure_aruco', methods=['POST'])
+def configure_aruco():
+    """
+    Configure ArUco whiteboard size in millimeters.
+    Expects JSON: {"width_mm": <number>, "height_mm": <number>}
+    """
+    try:
+        data = request.get_json() or {}
+        width_mm = data.get('width_mm') or data.get('width')
+        height_mm = data.get('height_mm') or data.get('height')
+        if width_mm is None or height_mm is None:
+            return jsonify({'error': 'width_mm and height_mm are required'}), 400
+        width_mm = float(width_mm)
+        height_mm = float(height_mm)
+        if width_mm <= 0 or height_mm <= 0:
+            return jsonify({'error': 'width_mm and height_mm must be positive'}), 400
+        detector.setWidthHeight(width_mm, height_mm)
+        print('set width and height to: ', width_mm, ' ', height_mm)
+        return jsonify({'success': True, 'width_mm': width_mm, 'height_mm': height_mm}), 200
+    except Exception as e:
+        return jsonify({'error': 'Failed to configure ArUco', 'details': str(e)}), 500
 
 if __name__ == '__main__':
     print('=' * 60)

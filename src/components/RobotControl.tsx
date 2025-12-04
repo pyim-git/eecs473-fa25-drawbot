@@ -54,6 +54,8 @@ export function RobotControl() {
   const [isCameraEnabled, setIsCameraEnabled] = useState(false);
   const [cameraError, setCameraError] = useState<string | null> (null);
   const [robotIpAddress, setRobotIpAddress] = useState<string>("172.20.10.2");
+  const [drawingWidthMM, setDrawingWidthMM] = useState<string>("1125");
+  const [drawingHeightMM, setDrawingHeightMM] = useState<string>("1000");
   const [availableImages, setAvailableImages] = useState<ImageInfo[]>([]);
   const [selectedImage, setSelectedImage] = useState<string>("myimage");
 
@@ -172,7 +174,7 @@ const stopCamera = () => {
         console.log("WebSocket connected");
         toast.success("Connected to robot");
 
-        ws.send("START_CONNECTION");
+        ws.send("START_CONNECTION\n");
 
         setRobotStatus({
           isConnected: true,
@@ -202,8 +204,17 @@ const stopCamera = () => {
         try {
           const response = await fetch("http://localhost:500/robot_pos");
           if (response.ok) {
-            const {x, y} = await response.json();
-            wsRef.current.send(`RobotPos: x=${x} y=${y}`);
+            if (event.data === "CAMERA_REQUEST\n") {
+              // Handle camera request, e.g., trigger camera or stream back acknowledgement
+              wsRef.current.send("CAMERA_ACK\n");
+              const {x, y} = await response.json();
+              if (x>=0 && y>=0){
+                wsRef.current.send(`RobotPos: x=${x} y=${y}`);
+              }
+              else {
+                wsRef.current.send("NO_POSITION\n");
+              }
+            }
           }
           else {
             console.log("error sending robot position");
@@ -223,7 +234,7 @@ const stopCamera = () => {
   const handleDisconnect = () => {
     if (wsRef.current) {
       if (wsRef.current.readyState === WebSocket.OPEN) {
-        wsRef.current.send("END_CONNECTION");
+        wsRef.current.send("END_CONNECTION\n");
       }
       wsRef.current.close();
       wsRef.current = null;
@@ -233,6 +244,41 @@ const stopCamera = () => {
       isConnected: false,
       ledOn: false,
     });
+  };
+
+  const handleConfigureAruco = async () => {
+    const width = parseFloat(drawingWidthMM);
+    const height = parseFloat(drawingHeightMM);
+
+    if (isNaN(width) || isNaN(height) || width <= 0 || height <= 0) {
+      toast.error("Please enter valid drawing space width and height (mm)");
+      return;
+    }
+
+    try {
+      const response = await fetch("http://localhost:500/configure_aruco", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          width_mm: width,
+          height_mm: height,
+        }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        const message = (data && (data.error || data.message)) || "Failed to configure ArUco";
+        toast.error(message);
+        return;
+      }
+
+      console.log("ArUco configured with current drawing space size");
+    } catch (error) {
+      console.error("Error configuring ArUco:", error);
+      toast.error("Could not reach local ArUco configuration API");
+    }
   };
 
   const handleSendCommands = async () => {
@@ -250,50 +296,82 @@ const stopCamera = () => {
 
     try {
       // Load the file from public/ using selected image name
-      const response_stepper = await fetch(`backend/color_output/${selectedImage}1.gcode`);
-      const stepperGCodeText = await response_stepper.text();
+      // Load the file from public/ using selected image name
       const response_gear = await fetch(`backend/color_output/${selectedImage}2.gcode`);
       const gearGCodeText = await response_gear.text();
 
-      const stepper_contours = stepperGCodeText
-        .split(/(?=Contour\s+\d+)/) // split BEFORE each "Contour <num>"
-        .map(chunk => chunk.trim()) // clean up whitespace
-        .filter(chunk => chunk.length > 0); // remove empties
+      console.log(`Found gear contours. Length: ${gearGCodeText.length} bytes`);
+      console.log("First 100 chars:", gearGCodeText.substring(0, 100));
 
-      console.log(`Found ${stepper_contours.length} stepper contours.`);
+      const response_stepper = await fetch(`backend/color_output/${selectedImage}1.gcode`);
+      const stepperGCodeText = await response_stepper.text();
 
-      // Example: send one contour at a time through a WebSocket
-      for (const contour of stepper_contours) {
-        console.log("Sending contour chunk:\n", contour);
-        wsRef.current.send(contour+'\n');
-        await new Promise(resolve => setTimeout(resolve, 10));
+      console.log(`Found stepper contours. Length: ${stepperGCodeText.length} bytes`);
+      console.log("First 100 chars:", stepperGCodeText.substring(0, 100));
+
+      // Helper function to split text into chunks of N lines
+      const splitIntoChunks = (text: string, linesPerChunk: number): string[] => {
+        const lines = text.split('\n');
+        const chunks: string[] = [];
+        for (let i = 0; i < lines.length; i += linesPerChunk) {
+          const chunk = lines.slice(i, i + linesPerChunk).join('\n');
+          if (chunk.length > 0) {
+            chunks.push(chunk + '\n');
+          }
+        }
+        return chunks;
+      };
+
+      // Helper function to send chunks with delay
+      const sendChunks = async (chunks: string[], chunkType: string) => {
+        for (let i = 0; i < chunks.length; i++) {
+          if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+            throw new Error("WebSocket disconnected during transmission");
+          }
+          
+          wsRef.current.send(chunks[i]);
+          console.log(`✅ Sent ${chunkType} chunk ${i + 1}/${chunks.length} (${chunks[i].length} bytes)`);
+          
+          // Small delay between chunks to ensure they're processed
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      };
+
+      // Split into chunks of 40 lines
+      const CHUNK_SIZE = 80;
+      const gearChunks = splitIntoChunks(gearGCodeText, CHUNK_SIZE);
+      const stepperChunks = splitIntoChunks(stepperGCodeText, CHUNK_SIZE);
+
+      console.log(`Splitting into chunks: ${gearChunks.length} gear chunks, ${stepperChunks.length} stepper chunks`);
+      console.log("Sending to ESP32...");
+
+      // Send gear gcode chunks
+      await sendChunks(gearChunks, "gear");
+      
+      // Send gear end marker
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send("GEAR_GCODE_END\n");
+        console.log("✅ Sent GEAR_GCODE_END marker");
+        await new Promise(resolve => setTimeout(resolve, 50));
       }
-      wsRef.current.send("STEPPER_GCODE_END"); // sent all gcode
 
-      toast.success(`Sent ${stepper_contours.length} stepper contours`);
-
-      const gear_contours = gearGCodeText
-        .split(/(?=Contour\s+\d+)/) // split BEFORE each "Contour <num>"
-        .map(chunk => chunk.trim()) // clean up whitespace
-        .filter(chunk => chunk.length > 0); // remove empties
-
-      console.log(`Found ${gear_contours.length} gear contours.`);
-
-      // Example: send one contour at a time through a WebSocket
-      for (const contour of gear_contours) {
-        console.log("Sending contour chunk:\n", contour);
-        wsRef.current.send(contour+'\n');
-        await new Promise(resolve => setTimeout(resolve, 10));
+      // Send stepper gcode chunks
+      await sendChunks(stepperChunks, "stepper");
+      
+      // Send stepper end marker
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send("STEPPER_GCODE_END\n");
+        console.log("✅ Sent STEPPER_GCODE_END marker");
       }
-      wsRef.current.send("GEAR_GCODE_END"); // sent all gcode
 
-      toast.success(`Sent ${gear_contours.length} gear contours`);
+      console.log("✅ All G-code sent successfully");
+
     } catch (err) {
       console.error("Failed to load or send GCode:", err);
       toast.error("Error loading GCode file");
     } finally {
       setIsSendingCommands(false);
-    }
+     }
   };
 
   return (
@@ -378,6 +456,43 @@ const stopCamera = () => {
                       className="w-full"
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label>Drawing Space (mm)</Label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label htmlFor="drawing-width-mm" className="text-xs">
+                          Width (mm)
+                        </Label>
+                        <Input
+                          id="drawing-width-mm"
+                          type="number"
+                          value={drawingWidthMM}
+                          onChange={(e) => setDrawingWidthMM(e.target.value)}
+                          className="w-full"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="drawing-height-mm" className="text-xs">
+                          Height (mm)
+                        </Label>
+                        <Input
+                          id="drawing-height-mm"
+                          type="number"
+                          value={drawingHeightMM}
+                          onChange={(e) => setDrawingHeightMM(e.target.value)}
+                          className="w-full"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    type="button"
+                    onClick={handleConfigureAruco}
+                  >
+                    Configure ArUco
+                  </Button>
                   <Button
                     className="w-full"
                     onClick={handleConnect}

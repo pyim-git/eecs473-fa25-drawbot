@@ -34,8 +34,8 @@ export function UploadSnapshot() {
   const [uploadComplete, setUploadComplete] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState('');
-  const [topLeftX, setTopLeftX] = useState('');
-  const [topLeftY, setTopLeftY] = useState('');
+  const [topLeftX, setTopLeftX] = useState('300');
+  const [topLeftY, setTopLeftY] = useState('300');
   const [bottomRightX, setBottomRightX] = useState('');
   const [bottomRightY, setBottomRightY] = useState('');
   const [imageType, setImageType] = useState<'digital' | 'photo'>('digital');
@@ -274,6 +274,8 @@ export function UploadSnapshot() {
       formData.append('imageType', imageType);
       formData.append('widthMM', widthMM.toString());
       formData.append('heightMM', heightMM.toString());
+      formData.append("top_left_x", topLeftXNum.toString());
+      formData.append("top_left_y", topLeftYNum.toString());
       
       // Add marker color mappings
       markerSelections.forEach((selection) => {
