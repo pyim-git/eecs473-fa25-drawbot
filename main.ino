@@ -12,27 +12,60 @@
 #include <math.h>
 #include "SparkFun_Qwiic_OTOS_Arduino_Library.h"
 
-// ====== I2C PINS ======
-#define CUSTOM_SDA 15  
-#define CUSTOM_SCL 16
-
-// ====== ENCODER PINS ======
-#define ENC_L_A 18
-#define ENC_L_B 12
-#define ENC_R_A 13
-#define ENC_R_B 14
-
-// ====== BAT PINS ======
+// ====== PIN DEFINITIONS ======
+#define CUSTOM_SDA 3  
+#define CUSTOM_SCL 4
+#define ENC_R_A 18
+#define ENC_R_B 8
+#define ENC_L_A 40
+#define ENC_L_B 39
 #define BAT 38
-
+#define IN1_R 16
+#define IN2_R 17
+#define IN3_L 41
+#define IN4_L 42
 // ====== ROBOT PARAMETERS ======
-#define WHEEL_RADIUS 0.0358      // 3.58 cm
-#define WHEEL_BASE   0.246063    // 24.6 cm
+#define WHEEL_RADIUS 0.0358      // meters
+#define WHEEL_BASE   0.246063    // meters
 #define TICKS_PER_REV 8400.0
 #define LOOP_DT_MS 20
 
-extern volatile double x, y, theta;
-extern volatile double x_s, y_s, theta_s;
+// ====== ENCODER DIRECTION ======
+#define ENC_L_DIR 1
+#define ENC_R_DIR -1
+
+// ====== GCODE STRUCTURE ======
+struct GcodeCommand {
+  char command[8];
+  float nextX, nextY;
+  bool hasX, hasY;
+  int color;
+}; 
+
+// ====== STEPPER STATE ======
+struct Stepper {
+  float currentX, currentY;
+  float nextX, nextY;
+  bool markerDown;
+  int color;
+}; 
+
+Stepper stepper;
+
+// ====== HARDWARE ======
+ESP32Encoder encLeft, encRight;
+QwiicOTOS myOtos;
+GANTRY gantry;
+
+// ====== PID VARIABLES ======
+double set_L = 0.0, input_L = 0.0, output_L = 0.0;
+double set_R = 0.0, input_R = 0.0, output_R = 0.0;
+volatile double Kp_rho   = 50.0;
+volatile double Kp_alpha = 20.0;
+volatile double Kp_theta = 80.0;
+volatile double Kp = 500.0;
+volatile double Ki = 0.01;
+volatile double Kd = 0.01;
 extern double set_L, input_L, output_L;
 extern double set_R, input_R, output_R;
 extern volatile bool isRotatingInPlace;
@@ -40,47 +73,44 @@ extern volatile int currentNavState;
 volatile int currentNavState = 0;
 volatile double S_param = 50.0;
 
-
-// ====== ENCODER DIRECTION ======
-#define ENC_L_DIR 1   // Try -1 if left encoder backwards
-#define ENC_R_DIR 1   // Try -1 if right encoder backwards
-
-// ====== TEST MODE ======
-#define ENCODER_TEST_MODE false  // SET TO false WHEN ENCODERS WORK
-#define MOTOR_DIRECTION_TEST false  // SET TO true TO TEST MOTOR DIRECTIONS
-
-
-// ====== CONTROL VARIABLES ======
-ESP32Encoder encLeft, encRight;
-QwiicOTOS myOtos;
-GANTRY gantry;
-
-// PID Variables - NO LIBRARY NEEDED
-double set_L = 0.0, input_L = 0.0, output_L = 0.0;
-double set_R = 0.0, input_R = 0.0, output_R = 0.0;
-
-// Odometry
-volatile double x = 0, y = 0, theta = M_PI / 2.0;
-volatile double prevx = 0, calculated_velocity = 0;
-
-// Target position & orientation
-int c = 0;
-double setpointx[4] = {0.1, 0.2, 0.2, 0.0};
-double setpointy[4] = {0.0, 0.2, 0.0, 0.0};
-double setpointtheta[4] = {0.0, 0.0, -M_PI/2, M_PI};
-
-volatile double x_s = setpointx[c];
-volatile double y_s = setpointy[c];
-volatile double theta_s = setpointtheta[c];
-
-// Velocity filtering
-static double filteredL = 0, filteredR = 0;
-
-// Global rotation flag
+// ====== ODOMETRY ======
+extern volatile double x = 0, y = 0, theta = M_PI / 2.0;
+extern volatile double prevx = 0, calculated_velocity = 0;
+extern volatile double x_s = 0.1, y_s = 0.0, theta_s = 0.0;
 volatile bool isRotatingInPlace = false;
 
-volatile bool cam_Valid;
+// ====== FILTERING ======
+static double filteredL = 0, filteredR = 0;
 
+// ====== CAMERA DATA ======
+float camX = 0.0, camY = 0.0;
+volatile bool cam_Valid = false;
+
+// ====== FREERTOS HANDLES ======
+SemaphoreHandle_t ExecuteGearSemaphore;
+SemaphoreHandle_t ExecuteStepperSemaphore;
+SemaphoreHandle_t poseMutex;
+SemaphoreHandle_t printMutex;
+SemaphoreHandle_t CameraUpdatedSemaphore;
+QueueHandle_t queStepper;
+QueueHandle_t queGear;
+TaskHandle_t taskWeb;
+
+// ====== GCODE BUFFER ======
+String gcodeBuffer = "";
+volatile bool gcodeReady = false;
+
+// ====== WIFI & WEBSOCKET ======
+const char* ssid = "shruti";
+const char* password = "shruti05";
+AsyncWebSocket ws("/ws");
+AsyncWebServer server(80);
+bool ledState = false;
+
+// ====== FORWARD DECLARATIONS ======
+void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
+             AwsEventType type, void *arg, uint8_t *data, size_t len);
+             
 // ====== UTILITY FUNCTIONS ======
 double wrapAngle(double angle) {
   while (angle > M_PI) angle -= 2 * M_PI;
@@ -88,83 +118,29 @@ double wrapAngle(double angle) {
   return angle;
 }
 
-// 1 - define freeRTOS settings
-#if CONFIG_FREERTOS_UNICORE
-#define ARDUINO_RUNNING_CORE 0
-#else
-#define ARDUINO_RUNNING_CORE 1
-#endif
-#define SYSTEM_RUNNING_CORE 0
+float getBatteryPercentage() {
+  return (analogRead(BAT) / 4095.0) * 100;
+}
 
-// ---- Camera postions and time status-----
-float camX = 0.0, camY = 0.0;
-static TickType_t LastUpdateTime = 0;
-const TickType_t TIMEOUT_TICKS = pdMS_TO_TICKS(3000);
+void ensureMarkerUp() {
+  if (stepper.markerDown) {
+    gantry.liftMarker();
+    vTaskDelay(pdMS_TO_TICKS(500));
+    stepper.markerDown = false;
+  }
+}
 
-// --- FreeRTOS handles ---
-TaskHandle_t OdometryHandle;
-TaskHandle_t ControlHandle;
-TaskHandle_t taskGcodeParse;
-TaskHandle_t taskGcodeExec;
-TaskHandle_t taskWeb;
-TaskHandle_t taskCamera;
-TaskHandle_t taskStepper;
+void ensureMarkerDown() {
+  if (!stepper.markerDown) {
+    gantry.lowerMarker();
+    vTaskDelay(pdMS_TO_TICKS(500));
+    stepper.markerDown = true;
+  }
+}
 
-// Declare semaphores
-SemaphoreHandle_t ExecuteGearSemaphore;
-SemaphoreHandle_t ExecuteStepperSemaphore;
-SemaphoreHandle_t ParseGCodeSemaphore;
-SemaphoreHandle_t poseMutex;
-SemaphoreHandle_t printMutex;
-SemaphoreHandle_t CameraUpdatedSemaphore;  
-
-// --- G-code Queue Structure ---
-const byte numChars = 128;
-struct GcodeCommand {
-  char command[8];           // G0, G1, D#, M30
-  float nextX, nextY;        // next coordinate destination
-  bool hasX;                 // Flag if X is present
-  bool hasY;                 // Flag if Y is present
-  int color;                 // marker position for drawing (1,2,3)
-};
-
-QueueHandle_t queStepper;
-QueueHandle_t queGear;
-
-struct Stepper{
-  float currentX, currentY;
-  float nextX, nextY;
-  bool markerDown;
-  int color;
-};
-
-Stepper stepper;  // global stepper variable - gives gantry information
-
-// --- G-code parsing variables ---
-String gcodeBuffer = "";
-bool isReceivingGcode = false;
-volatile bool gcodeReady = false;
-
-// --- WiFi Credentials ---
-const char* ssid = "shruti";
-const char* password = "shruti05"; // optionally may use mwireless wifi
-
-// --- WebSocket variables ---
-AsyncWebSocket ws("/ws");
-AsyncWebServer server(80);
-bool ledState = false;
-
-// Forward declarations
-void setMotorPWM(int leftPWM, int rightPWM);
-void stopMotors();
-void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
-             AwsEventType type, void *arg, uint8_t *data, size_t len);
-
-// --------------------------------------------------
-// WebSocket Functions
-// --------------------------------------------------
+// ====== WEBSOCKET HANDLERS ======
 void notifyClients() {
-  ws.textAll(ledState ? "LED_ON" : "LED_OFF"); // add any info we want to send to the server in this format.
+  ws.textAll(ledState ? "LED_ON" : "LED_OFF");
 }
 
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
@@ -173,372 +149,229 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
   if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
     data[len] = 0;
     String msg = (char*)data;
-    xSemaphoreTake(printMutex, portMAX_DELAY);
-    Serial.println("Received: " + msg);
-    xSemaphoreGive(printMutex);
-
+    
     if (msg.startsWith("START_CONNECTION")) {
       ledState = true;
       digitalWrite(LED_BUILTIN, HIGH);
       notifyClients();
-      return;
-    } else if (msg.startsWith("END_CONNECTION")) {
+    } 
+    else if (msg.startsWith("END_CONNECTION")) {
       ledState = false;
       digitalWrite(LED_BUILTIN, LOW);
       notifyClients();
-      return;
     }
     else if (msg.startsWith("RobotPos")) {
-
-      // Parse x=
-      int xIndex = msg.indexOf("x=");
-      if (xIndex >= 0) {
-          int start = xIndex + 2;
-          int end = msg.indexOf(' ', start);
-          String xStr = (end == -1) ? msg.substring(start)
-                                    : msg.substring(start, end);
-          camX = xStr.toFloat();
+      int xIdx = msg.indexOf("x=");
+      int yIdx = msg.indexOf("y=");
+      
+      if (xIdx >= 0) {
+        int end = msg.indexOf(' ', xIdx + 2);
+        camX = msg.substring(xIdx + 2, end == -1 ? msg.length() : end).toFloat();
       }
-
-      // Parse y=
-      int yIndex = msg.indexOf("y=");
-      if (yIndex >= 0) {
-          int start = yIndex + 2;
-          int end = msg.indexOf(' ', start);
-          String yStr = (end == -1) ? msg.substring(start)
-                                    : msg.substring(start, end);
-          camY = yStr.toFloat();
+      if (yIdx >= 0) {
+        int end = msg.indexOf(' ', yIdx + 2);
+        camY = msg.substring(yIdx + 2, end == -1 ? msg.length() : end).toFloat();
       }
-
-      // Signal camera updated
+      
+      cam_Valid = true;
       xSemaphoreGive(CameraUpdatedSemaphore);
-      return;
     }
     else if (msg.startsWith("STEPPER_GCODE_END")) {
       gcodeReady = true;
-      xSemaphoreTake(printMutex, portMAX_DELAY);
       Serial.println("All G-code received. Ready to execute!");
-      xSemaphoreGive(printMutex);
-      return;
     }
-    // Add the received line to the buffer
-    gcodeBuffer += msg;
- 
-    
+    else {
+      gcodeBuffer += msg;
+      Serial.println("Received: " + msg);
+    }
   }
 }
 
 void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
             AwsEventType type, void *arg, uint8_t *data, size_t len) {
   if (type == WS_EVT_CONNECT) {
-    xSemaphoreTake(printMutex, portMAX_DELAY);
-    Serial.printf("WebSocket client #%u connected from %s\n", 
-                  client->id(), client->remoteIP().toString().c_str());
-    xSemaphoreGive(printMutex);
+    Serial.printf("WebSocket client #%u connected\n", client->id());
   } else if (type == WS_EVT_DISCONNECT) {
-    xSemaphoreTake(printMutex, portMAX_DELAY);
     Serial.printf("WebSocket client #%u disconnected\n", client->id());
-    xSemaphoreGive(printMutex);
   } else if (type == WS_EVT_DATA) {
     handleWebSocketMessage(arg, data, len);
   }
 }
 
-// --------------------------------------------------
-// G-code Parsing Task
-// --------------------------------------------------
-void TaskGcodeParse(void *pvParameters) {
-  (void)pvParameters;
+// ====== GCODE PARSING ======
+struct GcodeCommand parseGcodeLine(const String& line) {
+  struct GcodeCommand cmd;
+  memset(&cmd, 0, sizeof(cmd));
   
+  if (line.startsWith("G0")) strcpy(cmd.command, "G0");
+  else if (line.startsWith("G1")) strcpy(cmd.command, "G1");
+  else if (line.startsWith("C ")) {
+    strcpy(cmd.command, "C");
+    cmd.color = line.substring(2).toInt();
+    return cmd;
+  }
+  else if (line.startsWith("D")) {
+    strcpy(cmd.command, "D");
+    cmd.nextY = line.substring(1).toFloat();
+    cmd.hasY = true;
+    return cmd;
+  }
+  else if (line.startsWith("B")) {
+    strcpy(cmd.command, "B");
+    return cmd;
+  }
+  
+  int xIdx = line.indexOf('X');
+  if (xIdx >= 0) {
+    cmd.nextX = line.substring(xIdx + 1).toFloat();
+    cmd.hasX = true;
+  }
+  
+  int yIdx = line.indexOf('Y');
+  if (yIdx >= 0) {
+    cmd.nextY = line.substring(yIdx + 1).toFloat();
+    cmd.hasY = true;
+  }
+  
+  return cmd;
+}
+
+void TaskGcodeParse(void *pvParameters) {
   static bool isGearGcode = true;
   
   for (;;) {
-    // Check if websocket has sent new data
-    while (gcodeBuffer.length() > 0 && gcodeBuffer.indexOf('\n') >= 0) {
-      String current_line = gcodeBuffer.substring(0, gcodeBuffer.indexOf("\n"));
-      
-      if (current_line.length() > 0) {
-        xSemaphoreTake(printMutex, portMAX_DELAY);
-        Serial.println("Parsing: " + current_line);
-        xSemaphoreGive(printMutex);
-      } else {
-        continue;
-      }
-      
-      // switch to stepper gcode parsing
-      if (current_line.startsWith("GEAR_GCODE_END")) {
-        xSemaphoreTake(printMutex, portMAX_DELAY);
-        Serial.println("Gear Gcode parsing complete. Begin parsing stepper commands");
-        xSemaphoreGive(printMutex);
-        isGearGcode = false;
-        continue; 
-      }
-
-      // declare command variable
-      GcodeCommand cmd;
-      memset(&cmd, 0, sizeof(cmd));
-      
-      // Parse the line
-      if (current_line.startsWith("G0") || current_line.startsWith("G1")) {
-      
-        // Extract command type
-        if (current_line.startsWith("G0")) {
-          strcpy(cmd.command, "G0");
-        } else {
-          strcpy(cmd.command, "G1");
-        }
-        
-        // Parse X coordinate
-        int xIndex = current_line.indexOf('X');
-        if (xIndex != -1) {
-          String xStr = current_line.substring(xIndex + 1);
-          int spaceIndex = xStr.indexOf(' ');
-          if (spaceIndex != -1) {
-            xStr = xStr.substring(0, spaceIndex);
-          }
-          cmd.nextX = xStr.toFloat();
-          cmd.hasX = true;
-        }
-        
-        // Parse Y coordinate
-        int yIndex = current_line.indexOf('Y');
-        if (yIndex != -1) {
-          String yStr = current_line.substring(yIndex + 1);
-          int spaceIndex = yStr.indexOf(' ');
-          if (spaceIndex != -1) {
-            yStr = yStr.substring(0, spaceIndex);
-          }
-          cmd.nextY = yStr.toFloat();
-          cmd.hasY = true;
-        }
-      }        
-      // Handle Color command
-      else if (current_line.startsWith("C")) {
-        int spaceIndex = current_line.indexOf(' ');
-        if (spaceIndex != -1) {
-          String currentColor = current_line.substring(spaceIndex + 1);
-          currentColor.trim();
-          
-          strcpy(cmd.command, "C");
-          cmd.color = currentColor.toInt();
-
-          xSemaphoreTake(printMutex, portMAX_DELAY);
-          Serial.println("Color set to: " + currentColor);
-          xSemaphoreGive(printMutex);
-        }
-      }
-      else if (current_line.startsWith("D")) {
-        // move down by # of points
-        String numStr = current_line.substring(1);
-        float points_down = numStr.toFloat();
-        strcpy(cmd.command, "D");
-        cmd.nextY = points_down; // nextY stores the relative points down
-        cmd.hasY = true;
-      }
-      else if (current_line.startsWith("B")) {
-        // follows a G1 backpass point (gear motor stops)
-        
-      }
-      else {
-        gcodeBuffer = gcodeBuffer.substring(gcodeBuffer.indexOf("\n") + 1);
-      }
-
-      // Send to execution queue
-      if (current_line.startsWith("D") || current_line.startsWith("G0") || current_line.startsWith("G1") || current_line.startsWith("Color") || current_line.startsWith("B")) {
-        BaseType_t xStatus;
-        if (isGearGcode) {
-          xStatus = xQueueSendToBack(queGear, &cmd, pdMS_TO_TICKS(100));
-        } else {
-          xStatus = xQueueSendToBack(queStepper, &cmd, pdMS_TO_TICKS(100));
-        }
-
-        if (xStatus == pdPASS) {
-          //only take out of buffer if dispatched to queue
-          gcodeBuffer = gcodeBuffer.substring(gcodeBuffer.indexOf("\n") + 1);
-          xSemaphoreTake(printMutex, portMAX_DELAY);
-          Serial.printf("Queued: %s X:%.2f Y:%.2f\n", cmd.command, cmd.nextX, cmd.nextY);
-          xSemaphoreGive(printMutex);
-        } else {
-          xSemaphoreTake(printMutex, portMAX_DELAY);
-          Serial.println("Queue full! Command dropped.");
-          xSemaphoreGive(printMutex);
-        }
-      }
-
+    int newlinePos = gcodeBuffer.indexOf('\n');
+    if (newlinePos < 0) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
     }
-    vTaskDelay(pdMS_TO_TICKS(10));
+    
+    String line = gcodeBuffer.substring(0, newlinePos);
+    line.trim();
+    
+    if (line.length() == 0) continue;
+    
+    if (line == "GEAR_GCODE_END") {
+      isGearGcode = false;
+      Serial.println("Switched to stepper G-code");
+      continue;
+    }
+    
+    struct GcodeCommand cmd = parseGcodeLine(line);
+    QueueHandle_t targetQueue = isGearGcode ? queGear : queStepper;
+    if (targetQueue == NULL) {
+        Serial.println("Queue failed to create!");
+    }
+    if (xQueueSend(targetQueue, &cmd, pdMS_TO_TICKS(100)) != pdPASS) {
+      Serial.println("Queue full! Dropped: " + line);
+    }
+    else {
+      gcodeBuffer.remove(0, newlinePos + 1); //queued, remove from buffer
+      Serial.println("Queued: " + line);
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(1));
   }
 }
 
-// --------------------------------------------------
-// Gear G-code Execution Task
-// --------------------------------------------------
-void TaskGcodeExec(void *pvParameters) {
-  (void)pvParameters;
-  while (!gcodeReady) {
-    vTaskDelay(pdMS_TO_TICKS(100));
+// ====== GEAR EXECUTION ======
+void executeGearCommand(const GcodeCommand& cmd) {
+  if (strcmp(cmd.command, "G0") == 0) {
+    ensureMarkerUp();
   }
+  else if (strcmp(cmd.command, "G1") == 0) {
+    ensureMarkerDown();
+  }
+  else if (strcmp(cmd.command, "C") == 0) {
+    ensureMarkerUp();
+    gantry.switchMarker(stepper.color, cmd.color);
+    stepper.color = cmd.color;
+    struct GcodeCommand dummy;
+    xQueueReceive(queGear, &dummy, 0);
+  }
+  else if (strcmp(cmd.command, "B") == 0) {
+    xSemaphoreTake(ExecuteStepperSemaphore, 0);
+    ensureMarkerUp();
+    struct GcodeCommand dummy;
+    xQueueReceive(queGear, &dummy, 0);
+  }
+}
+
+void TaskGcodeExec(void *pvParameters) {
+  while (!gcodeReady) vTaskDelay(pdMS_TO_TICKS(100));
   
-  GcodeCommand receivedGear_cmd;
-  BaseType_t xGearStatus;
-  const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
-
+  struct GcodeCommand cmd;
+  
   for (;;) {
-    xSemaphoreTake(ExecuteGearSemaphore,portMAX_DELAY);
+    xSemaphoreTake(ExecuteGearSemaphore, portMAX_DELAY);
     
-    xGearStatus = xQueuePeek(queGear, &receivedGear_cmd, xTicksToWait);
+    if (xQueuePeek(queGear, &cmd, pdMS_TO_TICKS(100)) != pdPASS) {
+      xSemaphoreGive(ExecuteGearSemaphore);
+      vTaskDelay(pdMS_TO_TICKS(10));
+      continue;
+    }
     
-    if (xGearStatus == pdPASS) {  
-      xSemaphoreTake(printMutex, portMAX_DELAY);
-      // Serial.println("=== Executing G-code (gear motor commands) ===");
-      // if (strcmp(receivedGear_cmd.command, "C") == 0)
-      // {
-      //   strcpy(currentColor,receivedGear_cmd.color);
-      // }
-      // else if (receivedGear_cmd.hasX && receivedGear_cmd.hasY) {
-      //   Serial.printf("Robot travel to X: %.2f, Y: %.2f\n", receivedGear_cmd.nextX, receivedGear_cmd.nextY);  
-      // }
-      // Serial.printf("Color: %s\n", currentColor);
-      // Serial.printf("Command: %s\n", receivedGear_cmd.command);
-      // if (receivedGear_cmd.hasX && receivedGear_cmd.hasY) {
-      //   Serial.printf("Robot travel to X: %.2f, Y: %.2f\n", receivedGear_cmd.nextX, receivedGear_cmd.nextY);  
-      // }
-      // Serial.println("========================");
-      // xSemaphoreGive(printMutex);
-
-      // ========= COMMANDS =========
-      // G0: ensure marker is lifted
-      if (strcmp(receivedGear_cmd.command, "G0") == 0) {
-        if (stepper.markerDown){
-          gantry.liftMarker();
-          vTaskDelay(pdMS_TO_TICKS(500)); // wait for marker to lift
-          stepper.markerDown = false;
-        }
-      } // if ..G0
-      
-      // G1: marker should be down
-      else if (strcmp(receivedGear_cmd.command, "G1") == 0) {
-        if (!stepper.markerDown)
-        {
-          gantry.lowerMarker();
-          vTaskDelay(pdMS_TO_TICKS(500)); // wait for marker to lower
-          stepper.markerDown = true;
-        }
-      } // if ..G1
-
-      // C: switching out color
-      else if (strcmp(receivedGear_cmd.command, "C") == 0) {
-        if (stepper.markerDown)
-        {
-          gantry.liftMarker();
-          vTaskDelay(pdMS_TO_TICKS(500)); // wait for marker to lift
-          stepper.markerDown = false;
-        } // if ..marker isn't lifted
-
-        gantry.switchMarker(stepper.color, receivedGear_cmd.color); // switch markers
-        stepper.color = receivedGear_cmd.color;
-        xGearStatus = xQueueReceive(queGear, &receivedGear_cmd, xTicksToWait); // pop off color commands
-      } // if ..C
-       else if (strcmp(receivedGear_cmd.command, "B") == 0) {
-        // reaches backpass point, stepper motor command stop executing for this pass
-        xSemaphoreTake(ExecuteStepperSemaphore, 0);
-        xGearStatus = xQueueReceive(queGear, &receivedGear_cmd, xTicksToWait);
-        if (stepper.markerDown)
-        {
-          gantry.liftMarker();
-          vTaskDelay(pdMS_TO_TICKS(500)); // wait for marker to lift
-          stepper.markerDown = false;
-        } // if ..marker isn't lifted
-        
-      } else if (strcmp(receivedGear_cmd.command, "D") == 0) {
-
-        // switches row: moves down by # of points
-
-      }
-      // Set target coordinates for the robot
-      if (receivedGear_cmd.hasX && receivedGear_cmd.hasY) {
-        xSemaphoreTake(poseMutex, portMAX_DELAY);
-        x_s = receivedGear_cmd.nextX;  
-        y_s = receivedGear_cmd.nextY;
-        xSemaphoreGive(poseMutex);
-        
-        // Wait for robot to reach position
-        vTaskDelay(pdMS_TO_TICKS(1000));
-      } // set coordinates for robot if command executed
-      else {
-        // No command in queue, just wait
-        vTaskDelay(pdMS_TO_TICKS(10));
-      } // else ..no commands
-    } // if ..xGearStatus == pdPASS
+    executeGearCommand(cmd);
+    
+    if (cmd.hasX && cmd.hasY) {
+      xSemaphoreTake(poseMutex, portMAX_DELAY);
+      x_s = cmd.nextX;
+      y_s = cmd.nextY;
+      xSemaphoreGive(poseMutex);
+      vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    
     xSemaphoreGive(ExecuteGearSemaphore);
   }
 }
 
-// --------------------------------------------------
-// Stepper G-code Execution Task
-// --------------------------------------------------
+// ====== STEPPER EXECUTION ======
 void TaskStepperGcodeExec(void *pvParameters) {
-  (void)pvParameters;
-  while (!gcodeReady) {
-    vTaskDelay(pdMS_TO_TICKS(100));
-  }
-
-  GcodeCommand receivedStepper_cmd;
-  BaseType_t xStepperStatus;
-  const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
-
+  while (!gcodeReady) vTaskDelay(pdMS_TO_TICKS(100));
+  
+  struct GcodeCommand cmd;
+  
   for (;;) {
-    xSemaphoreTake(ExecuteStepperSemaphore,portMAX_DELAY);
-
-    xStepperStatus = xQueuePeek(queStepper, &receivedStepper_cmd, xTicksToWait);
+    xSemaphoreTake(ExecuteStepperSemaphore, portMAX_DELAY);
     
-    if (xStepperStatus == pdPASS) {
-      xSemaphoreTake(printMutex, portMAX_DELAY);
-      Serial.println("=== Executing G-code (stepper motor commands) ===");
-      Serial.printf("Command: %s\n", receivedStepper_cmd.command);
-      if (receivedStepper_cmd.hasX && receivedStepper_cmd.hasY) {
-        // update current stepper position
-        stepper.currentY = stepper.nextY;
+    if (xQueuePeek(queStepper, &cmd, pdMS_TO_TICKS(100)) == pdPASS) {
+      Serial.printf("Stepper: %s X:%.2f Y:%.2f\n", cmd.command, cmd.nextX, cmd.nextY);
+      
+      if (cmd.hasX && cmd.hasY) {
         stepper.currentX = stepper.nextX;
-        // update next stepper position
-        stepper.nextX = receivedStepper_cmd.nextX;
-        stepper.nextY = receivedStepper_cmd.nextY;
-        Serial.printf("Stepper travel to X: %.2f, Y: %.2f\n", receivedStepper_cmd.nextX, receivedStepper_cmd.nextY);  
+        stepper.currentY = stepper.nextY;
+        stepper.nextX = cmd.nextX;
+        stepper.nextY = cmd.nextY;
       }
-      Serial.println("========================");
-      xSemaphoreGive(printMutex);
-    } // if xStepperStatus == pdPass
+    }
+    
     xSemaphoreGive(ExecuteStepperSemaphore);
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
 }
 
+// ====== SERIAL COMMANDS ======
 void SerialCommandTask(void *pv) {
   while (true) {
     if (Serial.available()) {
       String cmd = Serial.readStringUntil('\n');
       cmd.trim();
-
+      
       if (cmd.length() > 0 && (cmd.charAt(0) == 'S' || cmd.charAt(0) == 's')) {
         double newX, newY, thetaDeg;
-        int count = sscanf(cmd.c_str() + 1, "%lf %lf %lf", &newX, &newY, &thetaDeg);
-
-        if (count == 3) {
+        if (sscanf(cmd.c_str() + 1, "%lf %lf %lf", &newX, &newY, &thetaDeg) == 3) {
           x_s = newX;
           y_s = newY;
           theta_s = wrapAngle(thetaDeg * M_PI / 180.0);
-          
-          Serial.printf("✅ New setpoint: X=%.3f m, Y=%.3f m, Theta=%.2f° (%.3f rad)\n",
-                        x_s, y_s, thetaDeg, theta_s);
-        } else {
-          Serial.println("❌ Format error! Use: S <x> <y> <thetaDeg>");
+          Serial.printf("✅ Setpoint: X=%.3f Y=%.3f Θ=%.2f°\n", x_s, y_s, thetaDeg);
         }
       }
     }
     vTaskDelay(pdMS_TO_TICKS(100));
   }
-} // ..SerialCommandTask()
+}
 
-// ====== ENCODER + ODOMETRY ======
+// ====== ODOMETRY ======
 void encoderTask(void *pv) {
   static long prevL = 0, prevR = 0;
   const double alpha_filter = 0.1;
@@ -548,12 +381,13 @@ void encoderTask(void *pv) {
   static double lastTheta = 0;
   static unsigned long stillStartTime = 0;
   static bool wasStill = false;
-  const double ANGULAR_DRIFT_THRESHOLD = 0.005;  // rad/s (~0.03 deg/s)
-  const unsigned long STILL_TIME_MS = 100;  // Time to confirm robot is still
+  const double ANGULAR_DRIFT_THRESHOLD = 0.005;
+  const unsigned long STILL_TIME_MS = 100;
   
   for (;;) {
     long currL = encLeft.getCount() * ENC_L_DIR;
     long currR = encRight.getCount() * ENC_R_DIR;
+    
     long dL = currL - prevL;
     long dR = currR - prevR;
     prevL = currL;
@@ -568,9 +402,12 @@ void encoderTask(void *pv) {
     double deltaTheta = (distR - distL) / WHEEL_BASE;
 
     // Get theta from OTOS sensor only
-    sfe_otos_pose2d_t myPosition;
-    myOtos.getPosition(myPosition);
-    double rawTheta = myPosition.h * 1000 / 57296;
+    // sfe_otos_pose2d_t myPosition;
+    // myOtos.getPosition(myPosition);
+    // double rawTheta = myPosition.h * M_PI/180;
+    // double rawTheta =  M_PI/180;
+    double rawTheta = theta;
+
     
     // Calculate angular velocity for drift detection
     double angularVel = fabs((rawTheta - lastTheta) / dt);
@@ -614,9 +451,9 @@ void encoderTask(void *pv) {
 
     vTaskDelay(pdMS_TO_TICKS(LOOP_DT_MS));
   }
-} // encoderTask()
+}
 
-// ====== MANUAL PID CONTROLLER ======
+// ====== PID CONTROLLER ======
 void pidTask(void *pv) {
   // Wait for encoder task to start
   vTaskDelay(pdMS_TO_TICKS(200));
@@ -626,9 +463,6 @@ void pidTask(void *pv) {
   double lastErrorL = 0, lastErrorR = 0;
   
   // === PID Gains ===
-  const double Kp = 100.0;
-  const double Ki = 1.0;
-  const double Kd = 5.0;
   const double dt = LOOP_DT_MS / 1000.0;
   
   // === Anti-windup limits ===
@@ -676,6 +510,8 @@ void pidTask(void *pv) {
     //               set_L, input_L, errorL, output_L,
     //               set_R, input_R, errorR, output_R);
 
+    // ws.textAll("PWM");
+
     // === Apply PWM ===
     int pwmL = remapPID(output_L, isRotatingInPlace);
     int pwmR = remapPID(output_R, isRotatingInPlace);
@@ -684,335 +520,335 @@ void pidTask(void *pv) {
 
     motorWrite(true, pwmL);
     motorWrite(false, pwmR);
-   vTaskDelay(pdMS_TO_TICKS(LOOP_DT_MS)
-  );
+
+    vTaskDelay(pdMS_TO_TICKS(LOOP_DT_MS));
   }
-} // ..pidTask()
+}
 
 // ====== STEPPER CONTROLLER ======
 void stepperTask(void *pvParameters) {
-  (void)pvParameters;
-  const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
   for (;;) {
-    // calculate stepper velocity - slope * calc velocity
-    float stepper_velocity = calculated_velocity*(stepper.nextY-stepper.currentY)/(stepper.nextX-stepper.currentX);
-    
-    gantry.move(stepper.nextY, stepper_velocity);
-    
-    // if the target y is reached
-    if ((gantry.position == stepper.nextY))
-    {
-      // pop off the queue
-      GcodeCommand receivedStepper_cmd;
-      BaseType_t xStepperStatus = xQueueReceive(queStepper, &receivedStepper_cmd, xTicksToWait);
-    } // if ..target x reached  
-    vTaskDelay(pdMS_TO_TICKS(10)); // 10 ms, arbitrary
-  } // for ..;;
-} // ..stepperTask()
+    if (stepper.nextX != stepper.currentX) {
+      float stepper_velocity = calculated_velocity * 
+        (stepper.nextY - stepper.currentY) / (stepper.nextX - stepper.currentX);
+      
+      gantry.move(stepper.nextY, stepper_velocity);
+      
+      if (gantry.position == stepper.nextY) {
+        struct GcodeCommand cmd;
+        xQueueReceive(queStepper, &cmd, pdMS_TO_TICKS(100));
+      }
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
+  }
+}
 
-
-// ====== VELOCITY CALCULATION =====
-void velocityTask (void *pvParameters) {
-  (void)pvParameters;
-  const TickType_t period = 5 / portTICK_PERIOD_MS; // 5 ms
+// ====== VELOCITY CALCULATION ======
+void velocityTask(void *pvParameters) {
   TickType_t lastWakeTime = xTaskGetTickCount();
   while (true) {
-      calculated_velocity = (x - prevx)*1000/0.005;
-      prevx = x;
-      vTaskDelayUntil(&lastWakeTime, period);
+    calculated_velocity = (x - prevx) * 200.0;  // 1000/5ms = 200
+    prevx = x;
+    vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(5));
   }
-} // ... velocityTask()
+}
 
+// ====== GOAL REACHED HANDLER ======
+void handleGoalReached() {
+  static unsigned long lastCameraCheck = 0;
+  const unsigned long CAMERA_INTERVAL = 3000;
+  
+  xSemaphoreGive(ExecuteGearSemaphore);
+  
+  if (millis() - lastCameraCheck > CAMERA_INTERVAL) {
+    lastCameraCheck = millis();
+    
+    ws.textAll("CAMERA_REQUEST");
+    ws.textAll("BATTERY_STATUS " + String(getBatteryPercentage()) + "%");
+    
+    if (xSemaphoreTake(CameraUpdatedSemaphore, pdMS_TO_TICKS(5000)) == pdTRUE) {
+      if (cam_Valid) {
+        float distance = sqrt(pow(camX - x, 2) + pow(camY - y, 2));
+        
+        if (distance >= 0.10) {  // 10cm tolerance
+          ensureMarkerUp();
+          x = camX;
+          y = camY;
+          return;  // Re-navigate to corrected position
+        }
+      }
+    }
+  }
+  
+  xSemaphoreGive(ExecuteStepperSemaphore);
+  struct GcodeCommand cmd;
+  xQueueReceive(queGear, &cmd, pdMS_TO_TICKS(100));
+}
 
-// ====== NAVIGATION TASK (WITH BACKWARD MOTION) ======
+// ====== NAVIGATION ======
 void navigationTask(void *pv) {
     enum State {
-        DECIDE_MOTION,      // NEW: deciding what to do next
-        DRIVE_TO_GOAL,      // Drive forward or backward to goal
-        ROTATE_TO_FINAL,    // Rotate to final orientation
-        GOAL_REACHED        // Hold position
+        ROTATE_TO_GOAL = 0,
+        DRIVE_TO_GOAL = 1,
+        ROTATE_TO_FINAL = 2,
+        GOAL_REACHED = 3
     };
     
-    // block gear motor commands from executing while gear motor is navigating to target position
-    xSemaphoreTake(ExecuteGearSemaphore,portMAX_DELAY);
-    
-    State currentState = DECIDE_MOTION;
-    const TickType_t xTicksToWait = pdMS_TO_TICKS(100);
-    GcodeCommand receivedGear_cmd;
-    
-    // Control gains
-    const double Kp_rho   = 0.7;
-    const double Kp_alpha = 5.0;
-    const double Kp_theta = 1.0;
+    State currentState = ROTATE_TO_GOAL;
+    currentNavState = (int)currentState;
 
+    // ========== TUNING PARAMETERS (IMPROVED) ==========
     // Tolerances
-    const double goal_tolerance  = 0.01;
-    const double angle_tolerance = 0.01;
-
-    // Velocity limits
-    const double MAX_LINEAR_VEL  = 0.1;
-    const double MAX_ANGULAR_VEL = 0.7;
-    const double MAX_WHEEL_SPEED = 0.5;
-
-    // State management
-    unsigned long stateChangeTime = millis();
-    const unsigned long SETTLE_TIME = 300;
+    const double GOAL_TOLERANCE = 0.01;           // Position tolerance (m)
+    const double ANGLE_TOLERANCE = 0.05;          // Increased from 0.01 (~2.86° instead of 0.57°)
+    const double SEVERE_DRIFT_THRESHOLD = 1.05;   // Increased from 0.52 (~60° instead of 30°)
+    const double DRIFT_WARNING_THRESHOLD = 0.35;  // Increased from 0.087 (~20° instead of 5°)
     
-    // Motion direction flag
-    bool drivingBackward = false;
+    // Velocity limits
+    const double MAX_LINEAR_VEL = 0.1;            // m/s
+    const double MAX_ANGULAR_VEL = 0.7;           // rad/s
+    const double MAX_WHEEL_SPEED = 0.5;           // rev/s
+    const double MIN_DRIVE_SPEED = 0.5;           // Increased from 0.3
+    
+   
+    // State management with HYSTERESIS to prevent oscillation
+    const unsigned long SETTLE_TIME = 500;        // Increased from 300ms
+    const unsigned long MIN_STATE_TIME = 1000;    // NEW: Minimum time in each state
+    const unsigned long GOAL_HOLD_TIME = 1500;    
+    const double DRIFT_MULTIPLIER = 3.0;          
+    
+    unsigned long stateChangeTime = millis();
+    unsigned long lastPrintTime = 0;
+    const unsigned long PRINT_INTERVAL = 500;
+
+    // Oscillation prevention
+    unsigned long lastStateChange = millis();
+    State previousState = ROTATE_TO_GOAL;
+    int stateChangeCounter = 0;
+    unsigned long stateChangeResetTime = millis();
 
     for (;;) {
+        unsigned long currentTime = millis();
+        
+        // Detect rapid state oscillation
+        if (currentTime - stateChangeResetTime > 5000) {
+            stateChangeCounter = 0;
+            stateChangeResetTime = currentTime;
+        }
+        
+        // Check for external state reset
+        if (currentNavState != (int)currentState) {
+            currentState = (State)currentNavState;
+            stateChangeTime = currentTime;
+            lastStateChange = currentTime;
+            Serial.printf("🔄 State externally reset to: %d\n", currentNavState);
+        }
+        
+        // Calculate errors
         double dx = x_s - x;
         double dy = y_s - y;
         double rho = sqrt(dx*dx + dy*dy);
+        double targetHeading = atan2(dy, dx);
+        double headingError = wrapAngle(targetHeading - theta);
+        double finalAngleError = wrapAngle(theta_s - theta);
 
-        // Angle from robot to goal
-        double alpha = wrapAngle(atan2(dy, dx) - theta);
-        
-        // Angle error for final orientation
-        double dtheta = wrapAngle(theta_s - theta);
+        double v = 0.0;
+        double w = 0.0;
 
-        double v = 0;
-        double w = 0;
+        // Prevent state changes too quickly (hysteresis)
+        bool canChangeState = (currentTime - lastStateChange) > MIN_STATE_TIME;
 
         switch (currentState) {
-            case DECIDE_MOTION:
-                Serial.printf("[STATE 1: DECIDE_MOTION] α=%.3f (%.1f°), ρ=%.4f\n", 
-                             alpha, alpha * 180.0 / M_PI, rho);
+            
+            // ===== STATE 0: ROTATE TO FACE GOAL =====
+            case ROTATE_TO_GOAL: {
+                v = 0.0;
+                w = Kp_theta * headingError;
                 
-                // If target is behind us (|alpha| > 90°), drive backward
-                if (fabs(alpha) > M_PI / 2.0) {
-                    drivingBackward = true;
-                    Serial.println("   → Decision: DRIVE BACKWARD");
-                } else {
-                    drivingBackward = false;
-                    Serial.println("   → Decision: DRIVE FORWARD");
+                // More lenient position drift during rotation
+                const double ROTATION_DRIFT_TOLERANCE = 0.08; // Increased from 0.05
+                
+                if (currentTime - lastPrintTime > PRINT_INTERVAL) {
+                    // Serial.printf("[ROTATE_TO_GOAL] Heading: %.1f° | Pos drift: %.3fm | Can transition: %s\n", 
+                    //              headingError * 180.0 / M_PI, rho, canChangeState ? "YES" : "NO");
+                    lastPrintTime = currentTime;
                 }
                 
-                currentState = DRIVE_TO_GOAL;
-                stateChangeTime = millis();
+                // Only transition if well-aligned AND enough time has passed
+                if (fabs(headingError) < ANGLE_TOLERANCE && canChangeState) {
+                    if (currentTime - stateChangeTime > SETTLE_TIME) {
+                        currentState = DRIVE_TO_GOAL;
+                        currentNavState = (int)currentState;
+                        stateChangeTime = currentTime;
+                        lastStateChange = currentTime;
+                        stateChangeCounter++;
+                        Serial.println("✓ Aligned to goal! Starting drive...");
+                    }
+                } else {
+                    stateChangeTime = currentTime;
+                }
                 break;
-                
-            case DRIVE_TO_GOAL:
-                if (drivingBackward) {
-                    Serial.printf("[STATE 2: DRIVE_TO_GOAL - BACKWARD] ρ=%.4f m, α=%.3f\n", rho, alpha);
-                    
-                    // Drive backward with inverted steering
-                    v = -Kp_rho * rho;
-                    
-                    // Adjust alpha for backward motion
-                    // When driving backward, we want to minimize the angle to 180° from goal
-                    double alpha_backward = wrapAngle(alpha + (alpha > 0 ? -M_PI : M_PI));
-                    w = Kp_alpha * alpha_backward;
-                    
-                } else {
-                    Serial.printf("[STATE 2: DRIVE_TO_GOAL - FORWARD] ρ=%.4f m, α=%.3f\n", rho, alpha);
-                    
-                    // Drive forward normally
-                    v = Kp_rho * rho;
-                    w = Kp_alpha * alpha;
+            }
+
+            // ===== STATE 1: DRIVE FORWARD WITH CONTINUOUS CORRECTION =====
+            case DRIVE_TO_GOAL: {
+                // Check for severe drift ONLY if enough time has passed
+                if (fabs(headingError) > SEVERE_DRIFT_THRESHOLD && canChangeState) {
+                    Serial.printf("⚠️ SEVERE DRIFT: %.1f° → Re-rotating (after %.1fs in DRIVE)\n", 
+                                 headingError * 180.0 / M_PI, 
+                                 (currentTime - lastStateChange) / 1000.0);
+                    currentState = ROTATE_TO_GOAL;
+                    currentNavState = (int)currentState;
+                    stateChangeTime = currentTime;
+                    lastStateChange = currentTime;
+                    stateChangeCounter++;
+                    stopMotors();
+                    vTaskDelay(pdMS_TO_TICKS(200)); // Brief pause
+                    break;
                 }
                 
-                // Check if we've reached position
-                if (rho < goal_tolerance) {
-                    if (millis() - stateChangeTime > SETTLE_TIME) {
+                // Base velocities with STRONGER heading correction
+                v = Kp_rho * rho;
+                w = Kp_alpha * headingError;
+                
+                // Less aggressive speed reduction
+                double headingFactor = cos(headingError);
+                if (fabs(headingError) > DRIFT_WARNING_THRESHOLD) {
+                    double speedScale = max(MIN_DRIVE_SPEED, headingFactor);
+                    v *= speedScale;
+                    
+                    if (currentTime - lastPrintTime > PRINT_INTERVAL) {
+                        Serial.printf("[DRIVE] Correcting drift: %.1f° | Speed: %.0f%% | Time in state: %.1fs\n",
+                                     headingError * 180.0 / M_PI, speedScale * 100,
+                                     (currentTime - lastStateChange) / 1000.0);
+                        lastPrintTime = currentTime;
+                    }
+                }
+                
+                if (currentTime - lastPrintTime > PRINT_INTERVAL) {
+                    Serial.printf("[DRIVE_TO_GOAL] Distance: %.4fm | Heading: %.1f°\n", 
+                                 rho, headingError * 180.0 / M_PI);
+                    lastPrintTime = currentTime;
+                }
+                
+                // Transition when position reached
+                if (rho < GOAL_TOLERANCE) {
+                    if (currentTime - stateChangeTime > SETTLE_TIME) {
                         currentState = ROTATE_TO_FINAL;
-                        stateChangeTime = millis();
+                        currentNavState = (int)currentState;
+                        stateChangeTime = currentTime;
+                        lastStateChange = currentTime;
                         Serial.println("✓ Position reached! Rotating to final angle...");
                     }
                 } else {
-                    stateChangeTime = millis();
+                    stateChangeTime = currentTime;
                 }
                 break;
+            }
 
-            case ROTATE_TO_FINAL:
-                Serial.printf("[STATE 3: ROTATE_TO_FINAL] dθ=%.3f (%.1f°)\n", 
-                             dtheta, dtheta * 180.0 / M_PI);
+            // ===== STATE 2: ROTATE TO FINAL ORIENTATION =====
+            case ROTATE_TO_FINAL: {
+                v = 0.0;
+                w = Kp_theta * finalAngleError;
                 
-                v = 0;
-                w = Kp_theta * dtheta;
+                const double FINAL_ROTATION_DRIFT_TOLERANCE = 0.03; // Increased from 0.02
+                if (rho > FINAL_ROTATION_DRIFT_TOLERANCE && canChangeState) {
+                    Serial.printf("⚠️ Position drift: %.3fm → Re-approaching\n", rho);
+                    currentState = ROTATE_TO_GOAL;
+                    currentNavState = (int)currentState;
+                    stateChangeTime = currentTime;
+                    lastStateChange = currentTime;
+                    break;
+                }
                 
-                if (fabs(dtheta) < angle_tolerance) {
-                    if (millis() - stateChangeTime > SETTLE_TIME) {
+                if (currentTime - lastPrintTime > PRINT_INTERVAL) {
+                    Serial.printf("[ROTATE_TO_FINAL] Angle: %.1f° | Pos drift: %.4fm\n", 
+                                 finalAngleError * 180.0 / M_PI, rho);
+                    lastPrintTime = currentTime;
+                }
+                
+                if (fabs(finalAngleError) < ANGLE_TOLERANCE) {
+                    if (currentTime - stateChangeTime > SETTLE_TIME) {
                         currentState = GOAL_REACHED;
-                        stateChangeTime = millis();
-                        Serial.println("✓ Final orientation reached!");
+                        currentNavState = (int)currentState;
+                        stateChangeTime = currentTime;
+                        lastStateChange = currentTime;
+                        Serial.println("✓✓✓ GOAL REACHED! ✓✓✓");
                     }
                 } else {
-                    stateChangeTime = millis();
+                    stateChangeTime = currentTime;
                 }
                 break;
+            }
 
-            case GOAL_REACHED:
-                v = 0;
-                w = 0;
+            // ===== STATE 3: GOAL REACHED =====
+            case GOAL_REACHED: {
+                v = 0.0;
+                w = 0.0;
                 
-                xSemaphoreGive(ExecuteGearSemaphore);
+                // Monitor for drift
+                double positionDriftTolerance = GOAL_TOLERANCE * DRIFT_MULTIPLIER;
+                double angleDriftTolerance = ANGLE_TOLERANCE * DRIFT_MULTIPLIER;
                 
-                Serial.printf("[STATE 4: GOAL_REACHED] ρ=%.4f (tol %.4f) dθ=%.4f (tol %.4f) | Holding...\n", 
-                             rho, goal_tolerance * 3.0, dtheta, angle_tolerance * 3.0);
-
-                // --------------------------------------------------
-                // Camera Validates if Goal is Checked
-                // --------------------------------------------------
-                // requires 3 seconds timeout in between camera updates
-                TickType_t currentTime = xTaskGetTickCount();
-                bool pos_correct = true;
-
-                // robot arrived at point and timeout is met
-                if (currentTime - LastUpdateTime >= TIMEOUT_TICKS) {
-                  xSemaphoreTake(printMutex, portMAX_DELAY);
-                  Serial.println("Requesting camera check");
-                  xSemaphoreGive(printMutex);
-                  // sends camera request to webserver
-                  ws.textAll("CAMERA_REQUEST");
-
-                  if (xSemaphoreTake(CameraUpdatedSemaphore, pdMS_TO_TICKS(5000)) == pdTRUE) {
-                    if (cam_Valid) {
-                      xSemaphoreTake(printMutex, portMAX_DELAY);
-                      Serial.printf("Update camX: %.2f and camY  %.2f\n", camX, camY);
-                      xSemaphoreGive(printMutex);
-                      LastUpdateTime = xTaskGetTickCount();
-                       // check if within tolerance
-                      float distance = sqrt(pow((camX - x), 2) + pow((camY - y), 2));
-
-                      if (distance >= 10)
-                      { // correct position
-                        gantry.liftMarker();
-                        stepper.markerDown = false;
-                        x = camX;
-                        y = camY; 
-                        pos_correct = false;
-                      } 
-                    }
-                  }
-                }
-  
-                // pop the command from the queue, ready to issue next command
-                if (pos_correct) {
-                  xSemaphoreGive(ExecuteGearSemaphore);
-                  xSemaphoreGive(ExecuteStepperSemaphore);
-                  GcodeCommand receivedGear_cmd;
-                  BaseType_t xGearStatus = xQueueReceive(queGear, &receivedGear_cmd, xTicksToWait);
-                }
-                
-                
-                // After holding for a while, move to next setpoint
-                if (millis() - stateChangeTime > SETTLE_TIME * 5) {
-                    if (c < 3) {
-                        c++;
-                        x_s = setpointx[c];
-                        y_s = setpointy[c];
-                        theta_s = setpointtheta[c];
-                        currentState = DECIDE_MOTION;
-                        stateChangeTime = millis();
-                        Serial.printf("\n🎯 Moving to setpoint %d: (%.2f, %.2f, %.1f°)\n\n", 
-                                     c, x_s, y_s, theta_s * 180.0 / M_PI);
-                    }
-                }
-
-                // Check for drift - return to motion if needed
-                if (rho > goal_tolerance * 3.0) {
-                    Serial.printf("⚠️ Position drift detected! ρ=%.4f > %.4f\n", rho, goal_tolerance * 3.0);
-                    currentState = DECIDE_MOTION;
-                    stateChangeTime = millis();
-                } else if (fabs(dtheta) > angle_tolerance * 3.0) {
-                    Serial.printf("⚠️ Angle drift detected! |dθ|=%.4f > %.4f (%.1f°)\n", 
-                                 fabs(dtheta), angle_tolerance * 3.0, fabs(dtheta) * 180.0 / M_PI);
+                if (rho > positionDriftTolerance) {
+                    Serial.printf("⚠️ Position drift: %.4fm → Re-approaching goal\n", rho);
+                    currentState = ROTATE_TO_GOAL;
+                    currentNavState = (int)currentState;
+                    stateChangeTime = currentTime;
+                    lastStateChange = currentTime;
+                } else if (fabs(finalAngleError) > angleDriftTolerance) {
+                    Serial.printf("⚠️ Angle drift: %.1f° → Re-orienting\n", 
+                                 finalAngleError * 180.0 / M_PI);
                     currentState = ROTATE_TO_FINAL;
-                    stateChangeTime = millis();
+                    currentNavState = (int)currentState;
+                    stateChangeTime = currentTime;
+                    lastStateChange = currentTime;
                 }
                 break;
+            }
         }
 
-        // Apply velocity limits
+        // Detect and warn about oscillation
+        if (stateChangeCounter > 5) {
+            Serial.println("⚠️⚠️⚠️ WARNING: Rapid state oscillation detected! ⚠️⚠️⚠️");
+            Serial.printf("    Consider tuning: KP_ALPHA=%.2f, SEVERE_DRIFT=%.2f°\n",
+                         Kp_alpha, SEVERE_DRIFT_THRESHOLD * 180.0 / M_PI);
+        }
+
+        // ========== VELOCITY LIMITING & CONVERSION ==========
         v = constrain(v, -MAX_LINEAR_VEL, MAX_LINEAR_VEL);
         w = constrain(w, -MAX_ANGULAR_VEL, MAX_ANGULAR_VEL);
 
-        // Convert to wheel velocities (rev/s)
-        double vL = (v - w * WHEEL_BASE / 2.0) / (2 * M_PI * WHEEL_RADIUS);
-        double vR = (v + w * WHEEL_BASE / 2.0) / (2 * M_PI * WHEEL_RADIUS);
+        double vL = (v - w * WHEEL_BASE / 2.0) / (2.0 * M_PI * WHEEL_RADIUS);
+        double vR = (v + w * WHEEL_BASE / 2.0) / (2.0 * M_PI * WHEEL_RADIUS);
 
         vL = constrain(vL, -MAX_WHEEL_SPEED, MAX_WHEEL_SPEED);
         vR = constrain(vR, -MAX_WHEEL_SPEED, MAX_WHEEL_SPEED);
 
+        if (currentState == GOAL_REACHED) {
+            vL = 0.0;
+            vR = 0.0;
+        }
+
         set_L = vL;
         set_R = vR;
         
-        // Force stop at goal
-        if (currentState == GOAL_REACHED) {
-            set_L = 0.0;
-            set_R = 0.0;
-            vL = 0.0;
-            vR = 0.0;
-            v = 0.0;
-            w = 0.0;
-        }
-        
         isRotatingInPlace = (set_L * set_R < 0);
-
-        // Motion description for debug output
-        double linear_speed_cm_s = v * 100.0;
-        double angular_speed_deg_s = w * 180.0 / M_PI;
-        double left_rpm = vL * 60.0;
-        double right_rpm = vR * 60.0;
         
-        String motion_desc = "";
-        if (fabs(v) < 0.001 && fabs(w) < 0.001) {
-            motion_desc = "⏸️  STOPPED";
-        } else if (fabs(v) < 0.001) {
-            motion_desc = (w > 0) ? "🔄 ROTATING CCW" : "🔃 ROTATING CW";
-        } else if (fabs(w) < 0.01) {
-            motion_desc = (v > 0) ? "⬆️  DRIVING FORWARD" : "⬇️  DRIVING BACKWARD";
-        } else {
-            if (v > 0 && w > 0) motion_desc = "↖️  FORWARD + LEFT";
-            else if (v > 0 && w < 0) motion_desc = "↗️  FORWARD + RIGHT";
-            else if (v < 0 && w > 0) motion_desc = "↙️  BACKWARD + LEFT";
-            else motion_desc = "↘️  BACKWARD + RIGHT";
-        }
-        
-        Serial.println("┌─────────────────────────────────────────────────────────────┐");
-        Serial.printf("│ Position: x=%.3fm y=%.3fm θ=%.2f° (%.3frad)\n", 
-                      x, y, theta * 180.0 / M_PI, theta);
-        Serial.printf("│ Target:   x=%.3fm y=%.3fm θ=%.2f° (%.3frad)\n", 
-                      x_s, y_s, theta_s * 180.0 / M_PI, theta_s);
-        Serial.printf("│ Errors:   dist=%.3fm (%.1fcm)  angle=%.2f° (%.3frad)\n",
-                      rho, rho * 100.0, dtheta * 180.0 / M_PI, dtheta);
-        Serial.println("├─────────────────────────────────────────────────────────────┤");
-        Serial.printf("│ Motion:   %s\n", motion_desc.c_str());
-        Serial.printf("│ Linear:   v = %.3f m/s  (%.1f cm/s)\n", v, linear_speed_cm_s);
-        Serial.printf("│ Angular:  w = %.3f rad/s  (%.1f deg/s)\n", w, angular_speed_deg_s);
-        Serial.println("├─────────────────────────────────────────────────────────────┤");
-        Serial.printf("│ Left wheel:  vL = %.3f rev/s  (%.1f RPM)  ", vL, left_rpm);
-        if (vL > 0.01) Serial.println("⬆️ FORWARD");
-        else if (vL < -0.01) Serial.println("⬇️ BACKWARD");
-        else Serial.println("⏸️  STOPPED");
-        Serial.printf("│ Right wheel: vR = %.3f rev/s  (%.1f RPM)  ", vR, right_rpm);
-        if (vR > 0.01) Serial.println("⬆️ FORWARD");
-        else if (vR < -0.01) Serial.println("⬇️ BACKWARD");
-        else Serial.println("⏸️  STOPPED");
-        Serial.println("└─────────────────────────────────────────────────────────────┘\n");
-
         vTaskDelay(pdMS_TO_TICKS(LOOP_DT_MS * 2));
     }
-} // ..navigationTask()
+}
 
-// --------------------------------------------------
-// WebSocket Server Task
-// --------------------------------------------------
+// ====== WEB SERVER ======
 void TaskWebServer(void *pvParameters) {
   ws.onEvent(onEvent);
   server.addHandler(&ws);
-  
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", "<h1>G-code Robot Server</h1><p>Connect via WebSocket at ws://[IP]/ws</p>");
+    request->send(200, "text/html", "<h1>Robot Server</h1>");
   });
-
   server.begin();
-  
-  xSemaphoreTake(printMutex, portMAX_DELAY);
   Serial.println("Web server started");
-  xSemaphoreGive(printMutex);
+  
   for (;;) {
     ws.cleanupClients();
     vTaskDelay(pdMS_TO_TICKS(1000));
@@ -1024,92 +860,75 @@ void setup() {
   Serial.begin(115200);
   delay(100);
 
-  // Initialize gantry
   gantry.init();
-  Serial.print("Initialization Done!");
-
+  Serial.println("Gantry initialized");
+  
   Wire.begin(CUSTOM_SDA, CUSTOM_SCL);
   delay(1000);
-
+  
   pinMode(LED_BUILTIN, OUTPUT);
-  // Connect to WiFi
+  
   WifiClient wifi;
-  Serial.print("ESP IP Address: ");
-  Serial.println(wifi.connectWiFi("shruti", "shruti05"));
-
-  // Initialize OTOS sensor
-  Serial.println("Initializing OTOS sensor...");
-  while (!myOtos.begin()) {
-    Serial.println("❌ OTOS sensor failed to initialize!");
-    Serial.println("Check I2C wiring: SDA=" + String(CUSTOM_SDA) + " SCL=" + String(CUSTOM_SCL));
-    delay(1000);
-  }
-  Serial.println("✅ OTOS sensor initialized");
-
+  Serial.print("ESP IP: ");
+  Serial.println(wifi.connectWiFi(ssid, password));
+  
+  Serial.println("Initializing OTOS...");
+  myOtos.begin();
+  Serial.println("✅ OTOS initialized");
+  
   myOtos.calibrateImu();
   myOtos.resetTracking();
   myOtos.setAngularScalar(0.9985437903);
-  
   Wire.beginTransmission(0x0A);
   Wire.write(0x3A);
   Wire.write(0x5A);
   Wire.endTransmission();
-  
-  Serial.println("Robot Navigation Starting...");
-
-
-  // Initialize semaphores and queues
+  // Create synchronization objects
   poseMutex = xSemaphoreCreateMutex();
   printMutex = xSemaphoreCreateMutex();
   CameraUpdatedSemaphore = xSemaphoreCreateBinary();
   ExecuteGearSemaphore = xSemaphoreCreateBinary();
   ExecuteStepperSemaphore = xSemaphoreCreateBinary();
-  ParseGCodeSemaphore = xSemaphoreCreateBinary();
+  // battery
+  ws.textAll("BATTERY_STATUS " + String(getBatteryPercentage()) + "%");
+  if (!poseMutex || !printMutex || !CameraUpdatedSemaphore) {
+    Serial.println("❌ Semaphore creation failed!");
+    while(1) delay(1000);
+  }
   
   queStepper = xQueueCreate(50, sizeof(GcodeCommand));
   queGear = xQueueCreate(50, sizeof(GcodeCommand));
-
-  // Run motor direction test if enabled
-  if (MOTOR_DIRECTION_TEST) {
-    // testMotorDirections();
-  }
   
-  // Run encoder test if enabled
-  if (ENCODER_TEST_MODE) {
-    // testEncoders();
+  if (!queStepper || !queGear) {
+    Serial.println("❌ Queue creation failed!");
+    while(1) delay(1000);
   }
   
   setupMotors();
-
+  
   ESP32Encoder::useInternalWeakPullResistors = puType::up;
   encLeft.attachHalfQuad(ENC_L_A, ENC_L_B);
   encRight.attachHalfQuad(ENC_R_A, ENC_R_B);
-  
   encLeft.clearCount();
   encRight.clearCount();
-
-  Serial.printf("Target: x=%.2f, y=%.2f, theta=%.2f\n", x_s, y_s, theta_s);
-  Serial.println("Starting tasks in 2 seconds...");
+  
+  Serial.println("Starting tasks...");
   delay(2000);
-
-  // Start tasks
+  
   xTaskCreatePinnedToCore(encoderTask, "Encoders", 4096, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(pidTask, "PID", 4096, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(stepperTask, "Stepper", 4096, NULL, 2, NULL, 0);
-  xTaskCreatePinnedToCore(velocityTask, "CalculateVelocity", 4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(velocityTask, "Velocity", 4096, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(navigationTask, "Nav", 4096, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(SerialCommandTask, "Serial", 4096, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(TaskGcodeParse, "GcodeParse", 4096, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(TaskGcodeExec, "GcodeExec", 4096, NULL, 2, NULL, 1);
-  xTaskCreatePinnedToCore(TaskStepperGcodeExec, "StepperGcodeExec", 4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(TaskStepperGcodeExec, "StepperExec", 4096, NULL, 1, NULL, 0);
   xTaskCreatePinnedToCore(TaskWebServer, "WebServer", 8192, NULL, 1, &taskWeb, 1);
   
-
-
   Serial.println("✅ All tasks started!");
-} // ..setup()
+}
 
 void loop() {
-  // All work done in FreeRTOS tasks
   vTaskDelay(pdMS_TO_TICKS(1000));
-} // ..loop
+}
