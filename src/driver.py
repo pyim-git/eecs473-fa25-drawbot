@@ -652,11 +652,16 @@ class GcodeConverter:
         # Open file for writing: file1 for stepper commands, file2 for gear commands, file 3 for plotting
         with open(output_file1, 'w') as f1, open(output_file2, 'w') as f2, open (output_file3,'w') as f3:
             # initial conditions
-            current_row = 0 
-            LtoR = True
-            prev_point = np.array([0,0])
-            current_color = None
+            first_contour = sorted_contours[0]['contour'].reshape(-1,2)
+            prev_y = first_contour[0][1]
 
+            LtoR = True
+         #   prev_point = np.array([0,0])
+            prev_point = first_contour[0]
+            current_color = None
+            current_row = prev_y // self.RowHeight   # initial row at the bottom
+            current_row = (self.HEIGHT_MM // self.RowHeight )- current_row  # make row 0 at the bottom
+            
 
             for i, item in enumerate(sorted_contours):
                 color = item['color']
@@ -672,24 +677,25 @@ class GcodeConverter:
    
                 # find which row the contour belongs to
                 _, y, _, _ = cv2.boundingRect(contour)
-                row = y // self.RowHeight    # 0 indexed rows
+                next_row = y // self.RowHeight    # 0 indexed rows
 
-                if (i==0):
-                    current_row = row
+                # if (i==0):
+                #     current_row = prev_y // self.RowHeight   # initial row at the bottom
 
 
-                if row != current_row and i != 0: # new row!
+
+                if next_row != current_row and i != 0: # new row!
                     # same x coord, turn 90 degres to climb up
-                    f2.write(f"G0 X{prev_point[0]:.2f} Y0 A90\n")
+                    f2.write(f"G0 X{prev_point[0]:.2f} Y{current_row*self.RowHeight:.2f} A90\n")
 
                     # move up straight to get into next row
-                    f2.write(f"G0 X{prev_point[0]:.2f} Y{(current_row-row)*self.RowHeight:.2f} A0\n")
+                    f2.write(f"G0 X{prev_point[0]:.2f} Y{next_row*self.RowHeight:.2f} A0\n")
 
                     # adjust orientation to be facing right
-                    f2.write(f"G0 X{prev_point[0]:.2f} Y0 A-90\n")
-                    current_row = row
+                    f2.write(f"G0 X{prev_point[0]:.2f} Y{(next_row*self.RowHeight):.2f} A-90\n")
+                    current_row = next_row
                 else: # stays in the same row, no y movement
-                    f2.write(f"G0 X{points_gear[0][0]:.2f} Y0\n")
+                    f2.write(f"G0 X{prev_point[0]:.2f} Y{current_row*self.RowHeight:.2f}\n")
 
                 
                 # resets direction at the start of every contour by looking at first two points
@@ -702,7 +708,7 @@ class GcodeConverter:
 
                 points_stepper = points.copy()
                 points_stepper[:,0] += origin[0] # add x offset
-                points_stepper[:,1] -= row*self.RowHeight    # y offset is relative positions in [0,RowHeight]
+                points_stepper[:,1] -= current_row*self.RowHeight    # y offset is relative positions in [0,RowHeight]
 
                 # sends color command if color changes
                 if (current_color != color):
@@ -729,31 +735,33 @@ class GcodeConverter:
                     f1.write(f"G1 X{points_stepper[i+1][0]:.2f} Y{points_stepper[i+1][1]:.2f}\n")
 
                     if abs(point[0] - prev_point[0]) < 0.01:
-                        f2.write(f"G1 X{prev_point[0]:.2f} Y0\n")
+                        f2.write(f"current row: {current_row}\n")
+                        f2.write(f"G1 X{prev_point[0]:.2f} Y{current_row*self.RowHeight:.2f}\n")
                         f1.write("B\n")
 
                     else:
                         if LtoR:
                             if point[0] - prev_point[0] < 0:
                                 LtoR = False  # backpass, add to gear motor command
-                                f2.write(f"G1 X{prev_point[0]:.2f} Y0\n")
+                                f2.write(f"G1 X{prev_point[0]:.2f} Y{(current_row*self.RowHeight):.2f}\n")
                                 f1.write("B\n")
                             # else: keep traversing through the points
                         else: 
                             if (point[0]-prev_point[0]) > 0:
                                 LtoR = True
                                 f1.write("B\n")
-                                f2.write(f"G1 X{prev_point[0]:.2f} Y0\n")
+                                f2.write(f"G1 X{prev_point[0]:.2f} Y{current_row*self.RowHeight:.2f}\n")
 
                     prev_point = point
                                 
                 # add last point
-                f2.write(f"G1 X{points_gear[-1][0]:.2f} Y0\n")
+                f2.write(f"G1 X{points_gear[-1][0]:.2f} Y{current_row*self.RowHeight:.2f}\n")
                 f1.write(f"G1 X{points_stepper[-1][0]:.2f} Y{points_stepper[-1][1]:.2f}\n")
                 f1.write("B\n")
                 prev_point = points_gear[-1]
 
                 f3.write("\n")
+                f2.write("\n")
 
             f1.write("M30\n")      # end of drawing, program completes
             f2.write("M30\n") 
@@ -778,7 +786,7 @@ class GcodeConverter:
                     for j in range(i + 1, len(lines)):
                         line2 = lines[j].rstrip('\n')
                         # compute angle for line1 command
-                        if (line2.startswith('G0') or line2.startswith('G1') and ('A' not in line2)):
+                        if ((line2.startswith('G0') or line2.startswith('G1')) and ('A' not in line2)):
                             x2_match = re.search(r'X([-\d.]+)', line2)
                             if x2_match and x1_match:
                                 x2 = float(x2_match.group(1))
