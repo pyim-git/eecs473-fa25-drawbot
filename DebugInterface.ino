@@ -55,12 +55,12 @@ AsyncWebSocket ws("/ws");
 AsyncWebServer server(80);
 bool clientConnected = false;
 
-volatile double Kp_rho   = 0.7;
-volatile double Kp_alpha = 5.0;
-volatile double Kp_theta = 1.0;
+volatile double Kp_rho   = 50.0;
+volatile double Kp_alpha = 20.0;
+volatile double Kp_theta = 80.0;
 volatile double Kp = 500.0;
-volatile double Ki = 0.0;
-volatile double Kd = 0.0;
+volatile double Ki = 0.01;
+volatile double Kd = 0.01;
 // --- WebSocket Functions ---
 
 // Forward declarations
@@ -105,9 +105,6 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
     processCommand(cmdStr);
   }
 }
-
-
-
 void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
              AwsEventType type, void *arg, uint8_t *data, size_t len) {
   if (type == WS_EVT_CONNECT) {
@@ -122,15 +119,17 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
     Serial.printf("WebSocket error on client #%u\n", client->id());
   }
 }
-
+// Replace your sendTelemetry() function with this improved version:
 void sendTelemetry() {
-  // Check if any clients are connected
   if (ws.count() == 0) return;
   
-  // State names
+  static unsigned long lastSendTime = 0;
+  unsigned long now = millis();
+  if (now - lastSendTime < 100) return; // Max 10 Hz (was 25 Hz)
+  lastSendTime = now;
+  
   const char* stateNames[] = {"ROTATE_TO_GOAL", "DRIVE_TO_GOAL", "ROTATE_TO_FINAL", "GOAL_REACHED"};
   
-  // Create JSON string with telemetry data
   String json = "{";
   json += "\"x\":" + String(x, 3) + ",";
   json += "\"y\":" + String(y, 3) + ",";
@@ -149,7 +148,6 @@ void sendTelemetry() {
   json += "\"error_dist\":" + String(rho, 4) + ",";
   json += "\"error_angle\":" + String(dtheta * 180.0 / M_PI, 2) + ",";
   
-  // Get PWM values from remapPID
   int pwmL = remapPID(output_L, isRotatingInPlace);
   int pwmR = remapPID(output_R, isRotatingInPlace);
   
@@ -157,15 +155,10 @@ void sendTelemetry() {
   json += "\"pwm_right\":" + String(pwmR) + ",";
   json += "\"set_L\":" + String(set_L, 3) + ",";
   json += "\"set_R\":" + String(set_R, 3) + ",";
-  
-  // Add encoder values
   json += "\"enc_left\":" + String(currentEncL) + ",";
   json += "\"enc_right\":" + String(currentEncR) + ",";
-  
-  // Add state information
   json += "\"state\":" + String(currentNavState) + ",";
   json += "\"state_name\":\"" + String(stateNames[currentNavState]) + "\"";
-  
   json += "}";
   
   ws.textAll(json);
@@ -174,10 +167,6 @@ void sendTelemetry() {
 #define ENC_L_DIR 1   // Try -1 if left encoder backwards
 #define ENC_R_DIR -1   // Try -1 if right encoder backwards
 
-
-// ====== TEST MODE ======
-#define ENCODER_TEST_MODE false  // SET TO false WHEN ENCODERS WORK
-#define MOTOR_DIRECTION_TEST false  // SET TO true TO TEST MOTOR DIRECTIONS
 
 // ====== CONTROL VARIABLES ======
 ESP32Encoder encLeft, encRight;
@@ -238,13 +227,21 @@ int remapPID(double pidOutput, bool rotatingInPlace) {
     if(pidOutput < DEAD_PWM && pidOutput > -DEAD_PWM){
       scaledPID = 0;
     }
+    else if (pidOutput < MIN_PWM && pidOutput > DEAD_PWM){
+      scaledPID = MIN_PWM;
+
+    }
+      else if (pidOutput > -MIN_PWM && pidOutput < -DEAD_PWM){
+      scaledPID = -MIN_PWM;
+
+    }
     else if(pidOutput >255){
       scaledPID = 255;
-
     }
     else if(pidOutput < -255){
       scaledPID = -255;
     }
+
 
 
     // if (scaledPID < -atanh(MIN_PWM/255.0)*S_param || scaledPID > atanh(MIN_PWM/255.0)*S_param) {
@@ -430,6 +427,7 @@ void encoderTask(void *pv) {
     sfe_otos_pose2d_t myPosition;
     myOtos.getPosition(myPosition);
     double rawTheta = myPosition.h * M_PI/180;
+    // double rawTheta =  M_PI/180;
 
     
     // Calculate angular velocity for drift detection
@@ -622,7 +620,7 @@ void pidTask(void *pv) {
   }
 }
 
-// ====== NAVIGATION TASK (WITH BACKWARD MOTION) ======
+// ====== IMPROVED NAVIGATION TASK (ANTI-OSCILLATION) ======
 void navigationTask(void *pv) {
     enum State {
         ROTATE_TO_GOAL = 0,
@@ -634,131 +632,137 @@ void navigationTask(void *pv) {
     State currentState = ROTATE_TO_GOAL;
     currentNavState = (int)currentState;
 
-    // ========== TUNING PARAMETERS ==========
+    // ========== TUNING PARAMETERS (IMPROVED) ==========
     // Tolerances
     const double GOAL_TOLERANCE = 0.01;           // Position tolerance (m)
-    const double ANGLE_TOLERANCE = 0.01;          // Angle tolerance (rad, ~0.57°)
-    const double SEVERE_DRIFT_THRESHOLD = 0.52;   // ~30° - triggers full re-rotation
-    const double DRIFT_WARNING_THRESHOLD = 0.087; // ~5° - reduces speed
+    const double ANGLE_TOLERANCE = 0.05;          // Increased from 0.01 (~2.86° instead of 0.57°)
+    const double SEVERE_DRIFT_THRESHOLD = 1.05;   // Increased from 0.52 (~60° instead of 30°)
+    const double DRIFT_WARNING_THRESHOLD = 0.35;  // Increased from 0.087 (~20° instead of 5°)
     
     // Velocity limits
     const double MAX_LINEAR_VEL = 0.1;            // m/s
     const double MAX_ANGULAR_VEL = 0.7;           // rad/s
     const double MAX_WHEEL_SPEED = 0.5;           // rev/s
-    const double MIN_DRIVE_SPEED = 0.3;           // Minimum speed factor during drift correction
+    const double MIN_DRIVE_SPEED = 0.5;           // Increased from 0.3
     
-    // Control gains
-    const double KP_RHO_DRIVE = Kp_rho;           // Forward motion gain
-    const double KP_ALPHA_DRIVE = Kp_alpha * 1.5; // Heading correction during drive (stronger)
-    const double KP_THETA_ROTATE = Kp_theta;      // Pure rotation gain
+   
     
-    // State management
-    const unsigned long SETTLE_TIME = 300;        // ms to wait before state transition
-    const unsigned long GOAL_HOLD_TIME = 1500;    // ms to hold at goal before next setpoint
-    const double DRIFT_MULTIPLIER = 3.0;          // Tolerance multiplier for drift detection
+    // State management with HYSTERESIS to prevent oscillation
+    const unsigned long SETTLE_TIME = 500;        // Increased from 300ms
+    const unsigned long MIN_STATE_TIME = 1000;    // NEW: Minimum time in each state
+    const unsigned long GOAL_HOLD_TIME = 1500;    
+    const double DRIFT_MULTIPLIER = 3.0;          
     
     unsigned long stateChangeTime = millis();
     unsigned long lastPrintTime = 0;
-    const unsigned long PRINT_INTERVAL = 500;     // Print debug info every 500ms
+    const unsigned long PRINT_INTERVAL = 500;
 
-    // ========== MAIN CONTROL LOOP ==========
+    // Oscillation prevention
+    unsigned long lastStateChange = millis();
+    State previousState = ROTATE_TO_GOAL;
+    int stateChangeCounter = 0;
+    unsigned long stateChangeResetTime = millis();
+
     for (;;) {
         unsigned long currentTime = millis();
         
-        // Check for external state reset (from serial command)
+        // Detect rapid state oscillation
+        if (currentTime - stateChangeResetTime > 5000) {
+            stateChangeCounter = 0;
+            stateChangeResetTime = currentTime;
+        }
+        
+        // Check for external state reset
         if (currentNavState != (int)currentState) {
             currentState = (State)currentNavState;
             stateChangeTime = currentTime;
+            lastStateChange = currentTime;
             Serial.printf("🔄 State externally reset to: %d\n", currentNavState);
         }
         
         // Calculate errors
         double dx = x_s - x;
         double dy = y_s - y;
-        double rho = sqrt(dx*dx + dy*dy);                    // Distance to goal
-        double targetHeading = atan2(dy, dx);                // Angle to goal
-        double headingError = wrapAngle(targetHeading - theta); // Heading error during drive
-        double finalAngleError = wrapAngle(theta_s - theta); // Final orientation error
+        double rho = sqrt(dx*dx + dy*dy);
+        double targetHeading = atan2(dy, dx);
+        double headingError = wrapAngle(targetHeading - theta);
+        double finalAngleError = wrapAngle(theta_s - theta);
 
-        double v = 0.0;  // Linear velocity (m/s)
-        double w = 0.0;  // Angular velocity (rad/s)
+        double v = 0.0;
+        double w = 0.0;
 
-        // ========== STATE MACHINE ==========
+        // Prevent state changes too quickly (hysteresis)
+        bool canChangeState = (currentTime - lastStateChange) > MIN_STATE_TIME;
+
         switch (currentState) {
             
             // ===== STATE 0: ROTATE TO FACE GOAL =====
             case ROTATE_TO_GOAL: {
-                // Pure rotation in place
                 v = 0.0;
-                w = KP_THETA_ROTATE * headingError;
+                w = Kp_theta * headingError;
                 
-                // Check for position drift during rotation
-                const double ROTATION_DRIFT_TOLERANCE = 0.05; // 5cm drift allowed
-                if (rho > ROTATION_DRIFT_TOLERANCE && rho < 0.5) {
-                    // Significant drift detected, but we're close enough to consider driving
-                    Serial.printf("⚠️ Position drift during rotation: %.3fm → Switching to DRIVE\n", rho);
-                    currentState = DRIVE_TO_GOAL;
-                    currentNavState = (int)currentState;
-                    stateChangeTime = currentTime;
-                    break;
-                }
+                // More lenient position drift during rotation
+                const double ROTATION_DRIFT_TOLERANCE = 0.08; // Increased from 0.05
                 
-                // Debug output (throttled)
                 if (currentTime - lastPrintTime > PRINT_INTERVAL) {
-                    Serial.printf("[ROTATE_TO_GOAL] Heading: %.1f° | Pos drift: %.3fm\n", 
-                                 headingError * 180.0 / M_PI, rho);
+                    Serial.printf("[ROTATE_TO_GOAL] Heading: %.1f° | Pos drift: %.3fm | Can transition: %s\n", 
+                                 headingError * 180.0 / M_PI, rho, canChangeState ? "YES" : "NO");
                     lastPrintTime = currentTime;
                 }
                 
-                // Transition when aligned
-                if (fabs(headingError) < ANGLE_TOLERANCE) {
+                // Only transition if well-aligned AND enough time has passed
+                if (fabs(headingError) < ANGLE_TOLERANCE && canChangeState) {
                     if (currentTime - stateChangeTime > SETTLE_TIME) {
                         currentState = DRIVE_TO_GOAL;
                         currentNavState = (int)currentState;
                         stateChangeTime = currentTime;
+                        lastStateChange = currentTime;
+                        stateChangeCounter++;
                         Serial.println("✓ Aligned to goal! Starting drive...");
                     }
                 } else {
-                    stateChangeTime = currentTime; // Reset settle timer
+                    stateChangeTime = currentTime;
                 }
                 break;
             }
 
             // ===== STATE 1: DRIVE FORWARD WITH CONTINUOUS CORRECTION =====
             case DRIVE_TO_GOAL: {
-                // Check for severe drift (requires full stop and re-rotation)
-                if (fabs(headingError) > SEVERE_DRIFT_THRESHOLD) {
-                    Serial.printf("⚠️ SEVERE DRIFT: %.1f° → Full re-rotation\n", 
-                                 headingError * 180.0 / M_PI);
+                // Check for severe drift ONLY if enough time has passed
+                if (fabs(headingError) > SEVERE_DRIFT_THRESHOLD && canChangeState) {
+                    Serial.printf("⚠️ SEVERE DRIFT: %.1f° → Re-rotating (after %.1fs in DRIVE)\n", 
+                                 headingError * 180.0 / M_PI, 
+                                 (currentTime - lastStateChange) / 1000.0);
                     currentState = ROTATE_TO_GOAL;
                     currentNavState = (int)currentState;
                     stateChangeTime = currentTime;
+                    lastStateChange = currentTime;
+                    stateChangeCounter++;
                     stopMotors();
+                    vTaskDelay(pdMS_TO_TICKS(200)); // Brief pause
                     break;
                 }
                 
-                // Base velocities with continuous heading correction
-                v = KP_RHO_DRIVE * rho;
-                w = KP_ALPHA_DRIVE * headingError;
+                // Base velocities with STRONGER heading correction
+                v = Kp_rho * rho;
+                w = Kp_alpha * headingError;
                 
-                // Speed modulation based on heading error
-                // Reduces speed when off-angle to improve accuracy
+                // Less aggressive speed reduction
                 double headingFactor = cos(headingError);
                 if (fabs(headingError) > DRIFT_WARNING_THRESHOLD) {
-                    // Gradual speed reduction for moderate drift
                     double speedScale = max(MIN_DRIVE_SPEED, headingFactor);
                     v *= speedScale;
                     
                     if (currentTime - lastPrintTime > PRINT_INTERVAL) {
-                        Serial.printf("[DRIVE] Drift correction active: %.1f° | Speed: %.0f%%\n",
-                                     headingError * 180.0 / M_PI, speedScale * 100);
+                        Serial.printf("[DRIVE] Correcting drift: %.1f° | Speed: %.0f%% | Time in state: %.1fs\n",
+                                     headingError * 180.0 / M_PI, speedScale * 100,
+                                     (currentTime - lastStateChange) / 1000.0);
                         lastPrintTime = currentTime;
                     }
                 }
                 
-                // Debug output (throttled)
                 if (currentTime - lastPrintTime > PRINT_INTERVAL) {
-                    Serial.printf("[DRIVE_TO_GOAL] Distance: %.4fm | Heading error: %.1f°\n", 
+                    Serial.printf("[DRIVE_TO_GOAL] Distance: %.4fm | Heading: %.1f°\n", 
                                  rho, headingError * 180.0 / M_PI);
                     lastPrintTime = currentTime;
                 }
@@ -769,73 +773,56 @@ void navigationTask(void *pv) {
                         currentState = ROTATE_TO_FINAL;
                         currentNavState = (int)currentState;
                         stateChangeTime = currentTime;
+                        lastStateChange = currentTime;
                         Serial.println("✓ Position reached! Rotating to final angle...");
                     }
                 } else {
-                    stateChangeTime = currentTime; // Reset settle timer
+                    stateChangeTime = currentTime;
                 }
                 break;
             }
 
             // ===== STATE 2: ROTATE TO FINAL ORIENTATION =====
             case ROTATE_TO_FINAL: {
-                // Pure rotation to final setpoint angle
                 v = 0.0;
-                w = KP_THETA_ROTATE * finalAngleError;
+                w = Kp_theta * finalAngleError;
                 
-                // Check for position drift during final rotation
-                const double FINAL_ROTATION_DRIFT_TOLERANCE = 0.02; // 2cm - tighter than initial
-                if (rho > FINAL_ROTATION_DRIFT_TOLERANCE) {
-                    Serial.printf("⚠️ Position drift during final rotation: %.3fm → Re-approaching\n", rho);
+                const double FINAL_ROTATION_DRIFT_TOLERANCE = 0.03; // Increased from 0.02
+                if (rho > FINAL_ROTATION_DRIFT_TOLERANCE && canChangeState) {
+                    Serial.printf("⚠️ Position drift: %.3fm → Re-approaching\n", rho);
                     currentState = ROTATE_TO_GOAL;
                     currentNavState = (int)currentState;
                     stateChangeTime = currentTime;
+                    lastStateChange = currentTime;
                     break;
                 }
                 
-                // Debug output (throttled)
                 if (currentTime - lastPrintTime > PRINT_INTERVAL) {
                     Serial.printf("[ROTATE_TO_FINAL] Angle: %.1f° | Pos drift: %.4fm\n", 
                                  finalAngleError * 180.0 / M_PI, rho);
                     lastPrintTime = currentTime;
                 }
                 
-                // Transition when oriented
                 if (fabs(finalAngleError) < ANGLE_TOLERANCE) {
                     if (currentTime - stateChangeTime > SETTLE_TIME) {
                         currentState = GOAL_REACHED;
                         currentNavState = (int)currentState;
                         stateChangeTime = currentTime;
+                        lastStateChange = currentTime;
                         Serial.println("✓✓✓ GOAL REACHED! ✓✓✓");
                     }
                 } else {
-                    stateChangeTime = currentTime; // Reset settle timer
+                    stateChangeTime = currentTime;
                 }
                 break;
             }
 
-            // ===== STATE 3: GOAL REACHED (HOLDING & MONITORING) =====
+            // ===== STATE 3: GOAL REACHED =====
             case GOAL_REACHED: {
                 v = 0.0;
                 w = 0.0;
                 
-                // Optional: Move to next setpoint after holding
-                if (currentTime - stateChangeTime > GOAL_HOLD_TIME) {
-                    // Uncomment and configure for multi-waypoint navigation:
-                    // if (c < NUM_SETPOINTS - 1) {
-                    //     c++;
-                    //     x_s = setpointx[c];
-                    //     y_s = setpointy[c];
-                    //     theta_s = setpointtheta[c];
-                    //     currentState = ROTATE_TO_GOAL;
-                    //     currentNavState = (int)currentState;
-                    //     stateChangeTime = currentTime;
-                    //     Serial.printf("\n🎯 Moving to setpoint %d: (%.2f, %.2f, %.1f°)\n\n", 
-                    //                  c, x_s, y_s, theta_s * 180.0 / M_PI);
-                    // }
-                }
-
-                // Monitor for drift and correct if needed
+                // Monitor for drift
                 double positionDriftTolerance = GOAL_TOLERANCE * DRIFT_MULTIPLIER;
                 double angleDriftTolerance = ANGLE_TOLERANCE * DRIFT_MULTIPLIER;
                 
@@ -844,54 +831,48 @@ void navigationTask(void *pv) {
                     currentState = ROTATE_TO_GOAL;
                     currentNavState = (int)currentState;
                     stateChangeTime = currentTime;
+                    lastStateChange = currentTime;
                 } else if (fabs(finalAngleError) > angleDriftTolerance) {
                     Serial.printf("⚠️ Angle drift: %.1f° → Re-orienting\n", 
                                  finalAngleError * 180.0 / M_PI);
                     currentState = ROTATE_TO_FINAL;
                     currentNavState = (int)currentState;
                     stateChangeTime = currentTime;
+                    lastStateChange = currentTime;
                 }
                 break;
             }
         }
 
+        // Detect and warn about oscillation
+        if (stateChangeCounter > 5) {
+            Serial.println("⚠️⚠️⚠️ WARNING: Rapid state oscillation detected! ⚠️⚠️⚠️");
+            Serial.printf("    Consider tuning: KP_ALPHA=%.2f, SEVERE_DRIFT=%.2f°\n",
+                         Kp_alpha, SEVERE_DRIFT_THRESHOLD * 180.0 / M_PI);
+        }
+
         // ========== VELOCITY LIMITING & CONVERSION ==========
-        // Apply velocity limits
         v = constrain(v, -MAX_LINEAR_VEL, MAX_LINEAR_VEL);
         w = constrain(w, -MAX_ANGULAR_VEL, MAX_ANGULAR_VEL);
 
-        // Convert to differential drive wheel velocities
-        // v_wheel = (v_linear ± ω * wheelbase/2) / wheel_circumference
         double vL = (v - w * WHEEL_BASE / 2.0) / (2.0 * M_PI * WHEEL_RADIUS);
         double vR = (v + w * WHEEL_BASE / 2.0) / (2.0 * M_PI * WHEEL_RADIUS);
 
-        // Apply wheel speed limits
         vL = constrain(vL, -MAX_WHEEL_SPEED, MAX_WHEEL_SPEED);
         vR = constrain(vR, -MAX_WHEEL_SPEED, MAX_WHEEL_SPEED);
 
-        // Force complete stop at goal
         if (currentState == GOAL_REACHED) {
             vL = 0.0;
             vR = 0.0;
         }
 
-        // Update setpoints for motor controllers
         set_L = vL;
         set_R = vR;
         
-        // Track if robot is rotating in place (for potential use elsewhere)
         isRotatingInPlace = (set_L * set_R < 0);
 
-        // Debug: Print wheel speeds
-        if (currentTime - lastPrintTime > PRINT_INTERVAL && 
-            (fabs(vL) > 0.01 || fabs(vR) > 0.01)) {
-            Serial.printf("Wheel speeds → Left: %.3f | Right: %.3f rev/s\n", vL, vR);
-        }
-
-        // Send telemetry data
         sendTelemetry();
         
-        // Task delay (control loop rate)
         vTaskDelay(pdMS_TO_TICKS(LOOP_DT_MS * 2));
     }
 }
@@ -969,6 +950,7 @@ jjxDah2nGN59PRbxYvnKkKj9
 )EOF";
 
 // ====== SETUP ======
+// ====== COMPLETE SETUP FUNCTION ======
 void setup() {
   Serial.begin(115200);
   delay(100);
@@ -976,19 +958,21 @@ void setup() {
   Wire.begin(CUSTOM_SDA, CUSTOM_SCL);
   delay(1000);
   
+  // ====== WiFi Setup ======
   WifiClient wifi;
   Serial.print("ESP IP Address: ");
-  // Serial.println(wifi.connectWiFi("shruti", "shruti05"));
-  Serial.println(wifi.connectWiFi("athomare@umich.edu", "Aryan2004Michig!!",incommon_ca));
+  Serial.println(wifi.connectWiFi("athomare@umich.edu", "Aryan2004Michig!!", incommon_ca));
 
+  // ====== WebSocket & Web Server Setup ======
   
-  ws.onEvent(onEvent);
-  server.addHandler(&ws);
-  ws.onEvent(onEvent);      
-  server.addHandler(&ws); 
-  server.begin();
+  // Handle favicon to prevent 404 errors
+  server.on("/favicon.ico", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(204); // No content
+  });
+  
+  // Main web page
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-      request->send(200, "text/html", R"rawliteral(
+    request->send(200, "text/html", R"rawliteral(
 <!DOCTYPE html>
 <html>
 <head>
@@ -1414,43 +1398,91 @@ void setup() {
   </div>
 
   <script>
-    const ws = new WebSocket('ws://' + location.host + '/ws');
+    // ========== IMPROVED WEBSOCKET CONNECTION ==========
+    
+    const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const host = window.location.hostname;
+    const port = window.location.port || '80';
+    const wsUrl = protocol + host + (port ? ':' + port : '') + '/ws';
+    
+    console.log('🔌 Connecting to WebSocket at:', wsUrl);
+    
+    let ws;
+    let reconnectInterval;
+    let reconnectAttempts = 0;
+    const MAX_RECONNECT_ATTEMPTS = 10;
+    
+    function connectWebSocket() {
+      try {
+        ws = new WebSocket(wsUrl);
+        
+        ws.onopen = function() {
+          console.log('✅ WebSocket connected successfully');
+          reconnectAttempts = 0;
+          document.getElementById('status').textContent = 'CONNECTED';
+          document.getElementById('status').className = 'status-badge status-connected';
+          
+          if (reconnectInterval) {
+            clearInterval(reconnectInterval);
+          }
+          reconnectInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send('ping');
+            }
+          }, 5000);
+        };
+        
+        ws.onclose = function(event) {
+          console.log('❌ WebSocket disconnected. Code:', event.code, 'Reason:', event.reason || 'No reason given');
+          document.getElementById('status').textContent = 'DISCONNECTED';
+          document.getElementById('status').className = 'status-badge status-disconnected';
+          
+          if (reconnectInterval) {
+            clearInterval(reconnectInterval);
+          }
+          
+          if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+            reconnectAttempts++;
+            console.log(`🔄 Reconnecting... Attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
+            setTimeout(connectWebSocket, 2000);
+          } else {
+            console.error('❌ Max reconnection attempts reached. Please refresh the page.');
+            addCommandOutput('❌ Connection lost. Please refresh the page.');
+          }
+        };
+        
+        ws.onerror = function(error) {
+          console.error('⚠️ WebSocket error:', error);
+          addCommandOutput('⚠️ WebSocket error occurred');
+        };
+        
+        ws.onmessage = function(event) {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.response) {
+              addCommandOutput(data.response);
+            } else {
+              updateTelemetry(data);
+            }
+          } catch (e) {
+            console.log('📨 Non-JSON message:', event.data);
+          }
+        };
+        
+      } catch (error) {
+        console.error('❌ Failed to create WebSocket:', error);
+        addCommandOutput('❌ Failed to connect: ' + error.message);
+      }
+    }
+    
+    connectWebSocket();
+    
     const canvas = document.getElementById('canvas');
     const ctx = canvas.getContext('2d');
     
     const SCALE = 1000;
     const ORIGIN_X = canvas.width / 2;
     const ORIGIN_Y = canvas.height / 2;
-    
-    ws.onopen = function() {
-      console.log('WebSocket connected');
-      document.getElementById('status').textContent = 'CONNECTED';
-      document.getElementById('status').className = 'status-badge status-connected';
-      
-      setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send('ping');
-        }
-      }, 5000);
-    };
-    
-    ws.onclose = function() {
-      document.getElementById('status').textContent = 'DISCONNECTED';
-      document.getElementById('status').className = 'status-badge status-disconnected';
-    };
-    
-    ws.onmessage = function(event) {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.response) {
-          addCommandOutput(data.response);
-        } else {
-          updateTelemetry(data);
-        }
-      } catch (e) {
-        console.log('Non-JSON message:', event.data);
-      }
-    };
 
     function sendSetpoint() {
       let x = parseFloat(document.getElementById("inputX").value);
@@ -1499,19 +1531,16 @@ void setup() {
       output.appendChild(div);
       output.scrollTop = output.scrollHeight;
       
-      // Keep only last 10 messages
       while (output.children.length > 10) {
         output.removeChild(output.firstChild);
       }
     }
     
     function updateTelemetry(data) {
-      // Update position
       document.getElementById('pos-x').textContent = data.x.toFixed(5);
       document.getElementById('pos-y').textContent = data.y.toFixed(5);
       document.getElementById('pos-theta').textContent = data.theta.toFixed(1);
       
-      // Update encoders
       if (data.enc_left !== undefined) {
         document.getElementById("enc-left").textContent = data.enc_left;
       }
@@ -1519,7 +1548,6 @@ void setup() {
         document.getElementById("enc-right").textContent = data.enc_right;
       }
       
-      // Update velocities (using set values as proxy for current velocities)
       if (data.set_L !== undefined) {
         document.getElementById("vel-left").textContent = data.set_L.toFixed(3);
       }
@@ -1534,12 +1562,10 @@ void setup() {
         document.getElementById("raw-r").textContent = data.rawR.toFixed(0);
       }
       
-      // Update target
       document.getElementById('target-x').textContent = data.x_s.toFixed(3);
       document.getElementById('target-y').textContent = data.y_s.toFixed(3);
       document.getElementById('target-theta').textContent = data.theta_s.toFixed(1);
       
-      // Update navigation state
       document.getElementById('nav-state').textContent = data.state_name;
       
       const stateDescriptions = {
@@ -1559,7 +1585,6 @@ void setup() {
         stateElement.style.color = '#fff';
       }
       
-      // Update errors
       const distError = data.error_dist;
       const angleError = Math.abs(data.error_angle);
       
@@ -1582,15 +1607,12 @@ void setup() {
         angleDisplay.className = 'metric-value error-warning';
       }
       
-      // Update PWM values
       updatePWM('left', data.pwm_left);
       updatePWM('right', data.pwm_right);
       
-      // Update setpoints
       document.getElementById('set-l').textContent = data.set_L.toFixed(3);
       document.getElementById('set-r').textContent = data.set_R.toFixed(3);
       
-      // Update visualization
       drawRobot(data);
     }
     
@@ -1691,15 +1713,19 @@ void setup() {
   </script>
 </body>
 </html>
-      )rawliteral");
+    )rawliteral");
   });
-  // while (!clientConnected) {
-  //     Serial.println("Waiting for WebSocket client...");
-  //     delay(100);
-  // }
-  ws.textAll("HELLO!!! :) Debug line set up");
-  // Initialize OTOS sensor
-  ws.textAll("Initializing OTOS sensor...");
+  
+  // Setup WebSocket handlers
+  ws.onEvent(onEvent);
+  server.addHandler(&ws);
+  server.begin();
+  
+  Serial.println("🌐 Web server started!");
+  Serial.println("📱 Connect to the IP address shown above");
+
+  // ====== Initialize OTOS Sensor ======
+  Serial.println("🔧 Initializing OTOS sensor...");
   if (!myOtos.begin()) {
     Serial.println("❌ OTOS sensor failed to initialize!");
     Serial.println("Check I2C wiring: SDA=" + String(CUSTOM_SDA) + " SCL=" + String(CUSTOM_SCL));
@@ -1717,14 +1743,12 @@ void setup() {
   Wire.write(0x5A);
   Wire.endTransmission();
   
-  Serial.println("Robot Navigation Starting...");
+  Serial.println("🤖 Robot Navigation Starting...");
 
-  // Run motor direction test if enabled
-
-  
-
+  // ====== Setup Motors ======
   setupMotors();
 
+  // ====== Setup Encoders ======
   ESP32Encoder::useInternalWeakPullResistors = puType::up;
   encLeft.attachHalfQuad(ENC_L_A, ENC_L_B);
   encRight.attachHalfQuad(ENC_R_A, ENC_R_B);
@@ -1732,21 +1756,26 @@ void setup() {
   encLeft.clearCount();
   encRight.clearCount();
 
-  Serial.printf("Target: x=%.2f, y=%.2f, theta=%.2f\n", x_s, y_s, theta_s);
-  Serial.println("Starting tasks in 2 seconds...");
+  Serial.printf("🎯 Initial Target: x=%.2f, y=%.2f, theta=%.2f\n", x_s, y_s, theta_s);
+  Serial.println("⏱️  Starting tasks in 2 seconds...");
   delay(2000);
 
-  // Start tasks
+  // ====== Start FreeRTOS Tasks ======
   xTaskCreatePinnedToCore(encoderTask, "Encoders", 4096, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(pidTask, "PID", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(navigationTask, "Nav", 4096, NULL, 1, NULL, 1);
   xTaskCreatePinnedToCore(SerialCommandTask, "Serial", 4096, NULL, 1, NULL, 1);
 
   Serial.println("✅ All tasks started!");
+  Serial.println("📊 Telemetry streaming at 10 Hz");
+  Serial.println("💾 Free heap: " + String(ESP.getFreeHeap()) + " bytes");
 }
 
+// Replace your empty loop() with this:
 void loop() {
-  // All work done in FreeRTOS tasks
+  // Clean up disconnected WebSocket clients
+  ws.cleanupClients();
+  delay(10);
 }
         //SETPOINT: S x y theta
         //Position: P x y theta
