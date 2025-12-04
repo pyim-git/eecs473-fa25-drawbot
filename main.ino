@@ -74,7 +74,7 @@ volatile int currentNavState = 0;
 volatile double S_param = 50.0;
 
 // ====== ODOMETRY ======
-extern volatile double x = 0, y = 0, theta = M_PI / 2.0;
+extern volatile double x = 0, y = 0, theta = 0;
 extern volatile double prevx = 0, calculated_velocity = 0;
 extern volatile double x_s = 0.1, y_s = 0.0, theta_s = 0.0;
 volatile bool isRotatingInPlace = false;
@@ -317,6 +317,12 @@ void TaskGcodeExec(void *pvParameters) {
       xSemaphoreTake(poseMutex, portMAX_DELAY);
       x_s = cmd.nextX;
       y_s = cmd.nextY;
+      theta_s = (cmd.nextX-x)!=0? tanh((cmd.nextY-y)/(cmd.nextX-x)): 0; //RECTANGLE ONLY!!!
+      xSemaphoreTake(printMutex, portMAX_DELAY);
+      ws.textAll("EXECUTING: X: " + String(cmd.nextX) + " Y: " + String(cmd.nextY));
+      ws.textAll("MARKER " + String(stepper.markerDown ? "DOWN" : "UP"));
+      ws.textAll("COLOR " + String(stepper.color));
+      xSemaphoreGive(printMutex);
       xSemaphoreGive(poseMutex);
       vTaskDelay(pdMS_TO_TICKS(1000));
     }
@@ -836,15 +842,28 @@ void navigationTask(void *pv) {
         isRotatingInPlace = (set_L * set_R < 0);
         
         vTaskDelay(pdMS_TO_TICKS(LOOP_DT_MS * 2));
-    }
+    
+        String posMsg = "POSITION x=" + String(x, 3) + " y=" + String(y, 3) + 
+                    " theta=" + String(theta * 180.0 / M_PI, 1);
+      ws.textAll(posMsg);
+      
+      // Send target
+      String targetMsg = "TARGET x=" + String(x_s, 3) + " y=" + String(y_s, 3) + 
+                        " theta=" + String(theta_s * 180.0 / M_PI, 1);
+      ws.textAll(targetMsg);
+      
+      // Send nav state
+      ws.textAll("NAV_STATE " + String(currentNavState));
+  }
 }
+
 
 // ====== WEB SERVER ======
 void TaskWebServer(void *pvParameters) {
   ws.onEvent(onEvent);
   server.addHandler(&ws);
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", "<h1>Robot Server</h1>");
+    request->send(200, "text/html", R"rawliteral()rawliteral");
   });
   server.begin();
   Serial.println("Web server started");

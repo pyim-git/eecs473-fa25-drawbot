@@ -31,7 +31,8 @@ void GANTRY::moveRight(float distance, float speed) {
   // gantry.wakup();
   
   // set direction to be clockwise (moving right)
-  gantry.setDirection(DRV8825_CLOCK_WISE);
+  // gantry.setDirection(DRV8825_CLOCK_WISE);
+  digitalWrite(DIR, LOW);
 
   // Calculate number of steps
   int num_steps = distance/step_dist;
@@ -41,24 +42,25 @@ void GANTRY::moveRight(float distance, float speed) {
 
   // Serial.println("Moving gantry arm right!");
   for (int i = 0; i < num_steps; i++) {
-    gantry.step();
-    delay(wait);
+    // gantry.step();
+    // delay(wait);
+    digitalWrite(STEP, HIGH);
+    delay(waitTime);
+    digitalWrite(STEP, LOW);
+    delay(waitTime);
   } // for ..move number of required steps
 
   // add a little bit of delay to separate commands
   delay(waitTime);
-
-  // regrip marker (could've gotten loose)
-  grab();
   
-  // update position value
-  if (position + distance <= BELT_LENGTH) {
-    position += distance;
-  } // if ..position not hit zero
+  // // update position value
+  // if (position + distance <= BELT_LENGTH) {
+  //   position += distance;
+  // } // if ..position not hit zero
   
-  else {
-    position == BELT_LENGTH;
-  } // else ..position hits leftmost
+  // else {
+  //   position == BELT_LENGTH;
+  // } // else ..position hits leftmost
 } // ..moveRight()
 
 // move marker to the left (from robot's perspective)
@@ -68,7 +70,8 @@ void GANTRY::moveLeft(float distance, float speed) {
   // gantry.wakup();
 
   // set direction to be counterclockwise (moving left)
-  gantry.setDirection(DRV8825_COUNTERCLOCK_WISE);
+  // gantry.setDirection(DRV8825_COUNTER_CLOCK_WISE);
+  digitalWrite(DIR, HIGH);
 
   // Calculate number of steps
   int num_steps = distance/step_dist;
@@ -78,7 +81,11 @@ void GANTRY::moveLeft(float distance, float speed) {
 
   // Serial.println("Moving gantry arm left!");
   for (int i = 0; i < num_steps; i++) {
-    gantry.step();
+    // gantry.step();
+    // delay(wait);
+    digitalWrite(STEP, HIGH);
+    delay(wait);
+    digitalWrite(STEP, LOW);
     delay(wait);
   } // for ..move number of required steps
   
@@ -88,29 +95,26 @@ void GANTRY::moveLeft(float distance, float speed) {
   // add a little bit of delay to separate commands
   delay(waitTime);
 
-  // regrip marker (could've gotten loose)
-  grab();
-
-  // update position value
-  if (position - distance >= 0) {
-    position -= distance;
-  } // if ..position not hit zero
+  // // update position value
+  // if (position - distance >= 0) {
+  //   position -= distance;
+  // } // if ..position not hit zero
   
-  else {
-    position == 0.0;
-  } // else ..position hits leftmost
+  // else {
+  //   position == 0.0;
+  // } // else ..position hits leftmost
 } // ..moveLeft()
 
 // puts marker back into tool changing rack
 // specify postion to put it back into
-void GANTRY::putMarkerBack(int position) {
+void GANTRY::putMarkerBack(int pos) {
   // reset gantry position
   resetPos(0);
 
   // move gripper to position you want
   // CHANGE THIS WHEN TESTING TO GET BEST POSITION
-  if (position == 2) { moveRight(50, 50); }
-  else if (position == 3) { moveRight(100, 50); }
+  if (pos == 2) { moveRight(50*scale, 50); }
+  else if (pos == 3) { moveRight(100*scale, 50); }
 
   // marker currently in gripper
   // have tool rack grab marker
@@ -127,14 +131,14 @@ void GANTRY::putMarkerBack(int position) {
 
 // takes marker out of tool changing rack
 // specify postion to take it out of
-void GANTRY::takeMarkerFrom(int position) {
+void GANTRY::takeMarkerFrom(int pos) {
   // reset gantry position
   resetPos(0);
 
   // move gripper to position you want
   // CHANGE THIS WHEN TESTING TO GET BEST POSITION
-  if (position == 2) { moveRight(50, 50); }
-  else if (position == 3) { moveRight(100, 50); }
+  if (pos == 2) { moveRight(50*scale, 50); }
+  else if (pos == 3) { moveRight(100*scale, 50); }
 
   // marker currently not in gripper
   // have tool rack give gripper a marker
@@ -170,16 +174,23 @@ void GANTRY::release() {
 // CALL THIS FUNCTION IN SETUP LOOP!
 void GANTRY::init() {
   // start gantry belt stepper motor
-  gantry.begin(DIR, STEP, EN, RST, SLP); // DIR, STEP, EN, RST, SLP
-  gantry.setDirection(DRV8825_CLOCK_WISE);
+  // gantry.begin(DIR, STEP, EN, RST, SLP); // DIR, STEP, EN, RST, SLP
+  // gantry.setDirection(DRV8825_CLOCK_WISE);
+  pinMode(DIR, OUTPUT);
+  pinMode(STEP, OUTPUT);
+  pinMode(EN, OUTPUT);
+  pinMode(RST, OUTPUT);
+  pinMode(SLP, OUTPUT);
 
   // SET PINS TO DEFAULT STATE
+  digitalWrite(DIR, HIGH);
+  digitalWrite(STEP, LOW);
   digitalWrite(EN, LOW);
   digitalWrite(RST, HIGH);
-  digitalWrite(SLP, HIGH);
+  digitalWrite(SLP, LOW);
 
   // check reset pin - most important
-  if (!gantry.reset()) {
+  if (!digitalRead(RST)) { // !gantry.reset()
     Serial.println("ERROR: RESET pin not set to HIGH!");
     exit(1);
   }
@@ -199,9 +210,9 @@ void GANTRY::init() {
   */
 
   // initialize servos and steppers to initial positions
-  resetPos(0);
   grab();    // clamp grippers - grabbing initial marker
   tool_change.write(TOOL_RETRACT);   // reset position of tool change rack
+  resetPos(0);
 }
 
 // move gripper fully to the top of the gantry
@@ -210,11 +221,11 @@ void GANTRY::init() {
 void GANTRY::resetPos(int orientation) {
   // reset gantry position to left side
   if (orientation == 0) {   // normal orientation
-    moveLeft(100, 50);
+    move(0, 100);
   } // if ..orientation is normal - facing right
 
   else {
-    moveRight(100, 50);
+    move(100*scale, 100);
   } // else ..orientation is reversed - facing left
 
   // wait a bit
@@ -223,18 +234,27 @@ void GANTRY::resetPos(int orientation) {
 
 // gantry moves to an "absolute" position that it needs to move to
 void GANTRY::move(float pos, float speed) {
+  // wake up stepper
+  digitalWrite(SLP, HIGH);
+
   // figure out where marker needs to move to
   float moving = position - pos;
 
   // if moving is positive, move to the left
   if (moving > 0) {
-    moveLeft(moving, speed);
+    moveLeft(moving*scale, speed);
   } // if ..moveLeft
 
   // else moving is negative, move to the right
   else if (moving < 0) {
-    moveRight(abs(moving), speed);
+    moveRight(abs(moving*scale), speed);
   } // else ..moveRight
+
+  // update position
+  position = pos;
+
+  // have stepper go to sleep
+  digitalWrite(SLP, LOW);
 } // ..move()
 
 // ===== MARKER COMMANDS =====
