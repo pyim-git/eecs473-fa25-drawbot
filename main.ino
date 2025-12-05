@@ -9,6 +9,7 @@
 #include "gantry.h"
 #include "pid.h"
 #include <string>
+#include <ArduinoJson.h>
 #include <math.h>
 #include "SparkFun_Qwiic_OTOS_Arduino_Library.h"
 // ====== FREE RTOS VARS =======
@@ -30,6 +31,80 @@
 #define WHEEL_BASE   0.246063    // meters
 #define TICKS_PER_REV 8400.0
 #define LOOP_DT_MS 20
+
+extern long currentEncL, currentEncR;
+long currentEncL = 0, currentEncR = 0;
+
+static  char incommon_ca[] PROGMEM = R"EOF(
+-----BEGIN CERTIFICATE-----
+MIIF+TCCA+GgAwIBAgIQRyDQ+oVGGn4XoWQCkYRjdDANBgkqhkiG9w0BAQwFADCB
+iDELMAkGA1UEBhMCVVMxEzARBgNVBAgTCk5ldyBKZXJzZXkxFDASBgNVBAcTC0pl
+cnNleSBDaXR5MR4wHAYDVQQKExVUaGUgVVNFUlRSVVNUIE5ldHdvcmsxLjAsBgNV
+BAMTJVVTRVJUcnVzdCBSU0EgQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkwHhcNMTQx
+MDA2MDAwMDAwWhcNMjQxMDA1MjM1OTU5WjB2MQswCQYDVQQGEwJVUzELMAkGA1UE
+CBMCTUkxEjAQBgNVBAcTCUFubiBBcmJvcjESMBAGA1UEChMJSW50ZXJuZXQyMREw
+DwYDVQQLEwhJbkNvbW1vbjEfMB0GA1UEAxMWSW5Db21tb24gUlNBIFNlcnZlciBD
+QTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAJwb8bsvf2MYFVFRVA+e
+xU5NEFj6MJsXKZDmMwysE1N8VJG06thum4ltuzM+j9INpun5uukNDBqeso7JcC7v
+HgV9lestjaKpTbOc5/MZNrun8XzmCB5hJ0R6lvSoNNviQsil2zfVtefkQnI/tBPP
+iwckRR6MkYNGuQmm/BijBgLsNI0yZpUn6uGX6Ns1oytW61fo8BBZ321wDGZq0GTl
+qKOYMa0dYtX6kuOaQ80tNfvZnjNbRX3EhigsZhLI2w8ZMA0/6fDqSl5AB8f2IHpT
+eIFken5FahZv9JNYyWL7KSd9oX8hzudPR9aKVuDjZvjs3YncJowZaDuNi+L7RyML
+fzcCAwEAAaOCAW4wggFqMB8GA1UdIwQYMBaAFFN5v1qqK0rPVIDh2JvAnfKyA2bL
+MB0GA1UdDgQWBBQeBaN3j2yW4luHS6a0hqxxAAznODAOBgNVHQ8BAf8EBAMCAYYw
+EgYDVR0TAQH/BAgwBgEB/wIBADAdBgNVHSUEFjAUBggrBgEFBQcDAQYIKwYBBQUH
+AwIwGwYDVR0gBBQwEjAGBgRVHSAAMAgGBmeBDAECAjBQBgNVHR8ESTBHMEWgQ6BB
+hj9odHRwOi8vY3JsLnVzZXJ0cnVzdC5jb20vVVNFUlRydXN0UlNBQ2VydGlmaWNh
+dGlvbkF1dGhvcml0eS5jcmwwdgYIKwYBBQUHAQEEajBoMD8GCCsGAQUFBzAChjNo
+dHRwOi8vY3J0LnVzZXJ0cnVzdC5jb20vVVNFUlRydXN0UlNBQWRkVHJ1c3RDQS5j
+cnQwJQYIKwYBBQUHMAGGGWh0dHA6Ly9vY3NwLnVzZXJ0cnVzdC5jb20wDQYJKoZI
+hvcNAQEMBQADggIBAC0RBjjW29dYaK+qOGcXjeIT16MUJNkGE+vrkS/fT2ctyNMU
+11ZlUp5uH5gIjppIG8GLWZqjV5vbhvhZQPwZsHURKsISNrqOcooGTie3jVgU0W+0
++Wj8mN2knCVANt69F2YrA394gbGAdJ5fOrQmL2pIhDY0jqco74fzYefbZ/VS29fR
+5jBxu4uj1P+5ZImem4Gbj1e4ZEzVBhmO55GFfBjRidj26h1oFBHZ7heDH1Bjzw72
+hipu47Gkyfr2NEx3KoCGMLCj3Btx7ASn5Ji8FoU+hCazwOU1VX55mKPU1I2250Lo
+RCASN18JyfsD5PVldJbtyrmz9gn/TKbRXTr80U2q5JhyvjhLf4lOJo/UzL5WCXED
+Smyj4jWG3R7Z8TED9xNNCxGBMXnMete+3PvzdhssvbORDwBZByogQ9xL2LUZFI/i
+eoQp0UM/L8zfP527vWjEzuDN5xwxMnhi+vCToh7J159o5ah29mP+aJnvujbXEnGa
+nrNxHzu+AGOePV8hwrGGG7hOIcPDQwkuYwzN/xT29iLp/cqf9ZhEtkGcQcIImH3b
+oJ8ifsCnSbu0GB9L06Yqh7lcyvKDTEADslIaeSEINxhO2Y1fmcYFX/Fqrrp1WnhH
+OjplXuXE0OPa0utaKC25Aplgom88L2Z8mEWcyfoB7zKOfD759AN7JKZWCYwk
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIIF3jCCA8agAwIBAgIQAf1tMPyjylGoG7xkDjUDLTANBgkqhkiG9w0BAQwFADCB
+iDELMAkGA1UEBhMCVVMxEzARBgNVBAgTCk5ldyBKZXJzZXkxFDASBgNVBAcTC0pl
+cnNleSBDaXR5MR4wHAYDVQQKExVUaGUgVVNFUlRSVVNUIE5ldHdvcmsxLjAsBgNV
+BAMTJVVTRVJUcnVzdCBSU0EgQ2VydGlmaWNhdGlvbiBBdXRob3JpdHkwHhcNMTAw
+MjAxMDAwMDAwWhcNMzgwMTE4MjM1OTU5WjCBiDELMAkGA1UEBhMCVVMxEzARBgNV
+BAgTCk5ldyBKZXJzZXkxFDASBgNVBAcTC0plcnNleSBDaXR5MR4wHAYDVQQKExVU
+aGUgVVNFUlRSVVNUIE5ldHdvcmsxLjAsBgNVBAMTJVVTRVJUcnVzdCBSU0EgQ2Vy
+dGlmaWNhdGlvbiBBdXRob3JpdHkwggIiMA0GCSqGSIb3DQEBAQUAA4ICDwAwggIK
+AoICAQCAEmUXNg7D2wiz0KxXDXbtzSfTTK1Qg2HiqiBNCS1kCdzOiZ/MPans9s/B
+3PHTsdZ7NygRK0faOca8Ohm0X6a9fZ2jY0K2dvKpOyuR+OJv0OwWIJAJPuLodMkY
+tJHUYmTbf6MG8YgYapAiPLz+E/CHFHv25B+O1ORRxhFnRghRy4YUVD+8M/5+bJz/
+Fp0YvVGONaanZshyZ9shZrHUm3gDwFA66Mzw3LyeTP6vBZY1H1dat//O+T23LLb2
+VN3I5xI6Ta5MirdcmrS3ID3KfyI0rn47aGYBROcBTkZTmzNg95S+UzeQc0PzMsNT
+79uq/nROacdrjGCT3sTHDN/hMq7MkztReJVni+49Vv4M0GkPGw/zJSZrM233bkf6
+c0Plfg6lZrEpfDKEY1WJxA3Bk1QwGROs0303p+tdOmw1XNtB1xLaqUkL39iAigmT
+Yo61Zs8liM2EuLE/pDkP2QKe6xJMlXzzawWpXhaDzLhn4ugTncxbgtNMs+1b/97l
+c6wjOy0AvzVVdAlJ2ElYGn+SNuZRkg7zJn0cTRe8yexDJtC/QV9AqURE9JnnV4ee
+UB9XVKg+/XRjL7FQZQnmWEIuQxpMtPAlR1n6BB6T1CZGSlCBst6+eLf8ZxXhyVeE
+Hg9j1uliutZfVS7qXMYoCAQlObgOK6nyTJccBz8NUvXt7y+CDwIDAQABo0IwQDAd
+BgNVHQ4EFgQUU3m/WqorSs9UgOHYm8Cd8rIDZsswDgYDVR0PAQH/BAQDAgEGMA8G
+A1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQEMBQADggIBAFzUfA3P9wF9QZllDHPF
+Up/L+M+ZBn8b2kMVn54CVVeWFPFSPCeHlCjtHzoBN6J2/FNQwISbxmtOuowhT6KO
+VWKR82kV2LyI48SqC/3vqOlLVSoGIG1VeCkZ7l8wXEskEVX/JJpuXior7gtNn3/3
+ATiUFJVDBwn7YKnuHKsSjKCaXqeYalltiz8I+8jRRa8YFWSQEg9zKC7F4iRO/Fjs
+8PRF/iKz6y+O0tlFYQXBl2+odnKPi4w2r78NBc5xjeambx9spnFixdjQg3IM8WcR
+iQycE0xyNN+81XHfqnHd4blsjDwSXWXavVcStkNr/+XeTWYRUc+ZruwXtuhxkYze
+Sf7dNXGiFSeUHM9h4ya7b6NnJSFd5t0dCy5oGzuCr+yDZ4XUmFF0sbmZgIn/f3gZ
+XHlKYC6SQK5MNyosycdiyA5d9zZbyuAlJQG03RoHnHcAP9Dc1ew91Pq7P8yF1m9/
+qS3fuQL39ZeatTXaw2ewh0qpKJ4jjv9cJ2vhsE/zB+4ALtRZh8tSQZXq9EfX7mRB
+VXyNWQKV3WKdwrnuWih0hKWbt5DHDAff9Yk2dDLWKMGwsAvgnEzDHNb842m1R0aB
+L6KCq9NjRHDEjf8tM7qtj3u1cIiuPhnPQCjY/MiQu12ZIvVS5ljFH4gxQ+6IHdfG
+jjxDah2nGN59PRbxYvnKkKj9
+-----END CERTIFICATE-----
+)EOF";
 
 // ====== ENCODER DIRECTION ======
 #define ENC_L_DIR 1
@@ -60,6 +135,7 @@ QwiicOTOS myOtos;
 GANTRY gantry;
 
 // ====== PID VARIABLES ======
+
 double set_L = 0.0, input_L = 0.0, output_L = 0.0;
 double set_R = 0.0, input_R = 0.0, output_R = 0.0;
 volatile double Kp_rho   = 50.0;
@@ -78,7 +154,7 @@ volatile double S_param = 50.0;
 // ====== ODOMETRY ======
 extern volatile double x = 0, y = 0, theta = 0;
 extern volatile double prevx = 0, calculated_velocity = 0;
-extern volatile double x_s = 0.1, y_s = 0.0, theta_s = 0.0;
+extern volatile double x_s = 0, y_s = 0.0, theta_s = 0.0;
 volatile bool isRotatingInPlace = false;
 
 // ====== FILTERING ======
@@ -104,8 +180,8 @@ String gcodeBuffer = "";
 volatile bool gcodeReady = false;
 
 // ====== WIFI & WEBSOCKET ======
-const char* ssid = "shruti";
-const char* password = "shruti05";
+const char* ssid = "shrutish@umich.edu";
+const char* password = "HashtagHail101#";
 AsyncWebSocket ws("/ws");
 AsyncWebServer server(80);
 bool ledState = false;
@@ -114,6 +190,8 @@ bool ledState = false;
 void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
              AwsEventType type, void *arg, uint8_t *data, size_t len);
              
+
+
 // ====== UTILITY FUNCTIONS ======
 double wrapAngle(double angle) {
   while (angle > M_PI) angle -= 2 * M_PI;
@@ -149,55 +227,73 @@ void notifyClients() {
 
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
   AwsFrameInfo *info = (AwsFrameInfo*)arg;
-  
-  if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
-    data[len] = 0;
-    String msg = (char*)data;
+
+  if (!(info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT)) 
+      return;
+
+  String msg = String((char*)data).substring(0, len);
+  if(msg!= "ping"){
+    Serial.println("Got Msg: " + msg);
+  }
+  if (msg.startsWith("RobotPos")) {
+    int xIdx = msg.indexOf("x=");
+    int yIdx = msg.indexOf("y=");
     
-    if (msg.startsWith("START_CONNECTION")) {
-      ledState = true;
-      digitalWrite(LED_BUILTIN, HIGH);
-      notifyClients();
-    } 
-    else if (msg.startsWith("END_CONNECTION")) {
-      ledState = false;
-      digitalWrite(LED_BUILTIN, LOW);
-      notifyClients();
+    if (xIdx >= 0) {
+      int end = msg.indexOf(' ', xIdx + 2);
+      camX = msg.substring(xIdx + 2, end == -1 ? msg.length() : end).toFloat();
     }
-    else if (msg.startsWith("RobotPos")) {
-      int xIdx = msg.indexOf("x=");
-      int yIdx = msg.indexOf("y=");
-      
-      if (xIdx >= 0) {
-        int end = msg.indexOf(' ', xIdx + 2);
-        camX = msg.substring(xIdx + 2, end == -1 ? msg.length() : end).toFloat();
-      }
-      if (yIdx >= 0) {
-        int end = msg.indexOf(' ', yIdx + 2);
-        camY = msg.substring(yIdx + 2, end == -1 ? msg.length() : end).toFloat();
-      }
-      
-      cam_Valid = true;
-      xSemaphoreGive(CameraUpdatedSemaphore);
+    if (yIdx >= 0) {
+      int end = msg.indexOf(' ', yIdx + 2);
+      camY = msg.substring(yIdx + 2, end == -1 ? msg.length() : end).toFloat();
     }
-    else if (msg.startsWith("STEPPER_GCODE_END")) {
-      gcodeReady = true;
-      Serial.println("All G-code received. Ready to execute!");
+    Serial.println("camX: " + String(camX) + " camY: " + String(camY));
+    cam_Valid = true;
+    xSemaphoreGive(CameraUpdatedSemaphore);
+  }
+  else if (msg.startsWith("STEPPER_GCODE_END")) {
+    gcodeReady = true;
+    Serial.println("All G-code received. Ready to execute!");
+  }
+  else if (msg.startsWith("GCODE")){
+    gcodeBuffer += msg.substring(5,len);
+    Serial.println("Received: " + msg);
+    ws.textAll("Received: " + msg);
+  }
+  else {
+    DynamicJsonDocument doc(256);
+    DeserializationError err = deserializeJson(doc, msg);
+    if (err) {
+      // If not JSON, treat as command string
+      processCommand(msg);
+      return;
     }
-    else {
-      gcodeBuffer += msg;
-      Serial.println("Received: " + msg);
-      ws.textAll("Received: " + msg);
+    String cmd = doc["cmd"];
+
+    if (cmd == "setpoint") {
+      double newX = doc["x"];
+      double newY = doc["y"];
+      double newTdeg = doc["theta"];
+
+      x_s = newX;
+      y_s = newY;
+      theta_s = wrapAngle(newTdeg * M_PI / 180.0);
+      currentNavState = 0;
+
+      Serial.printf("📌 New setpoint via Web: X=%.2f  Y=%.2f  Th=%.1f°\n",
+                    x_s, y_s, newTdeg);
     }
+    else if (cmd == "command") {
+      String cmdStr = doc["text"];
+      processCommand(cmdStr);
+    }    
   }
 }
 
 void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
             AwsEventType type, void *arg, uint8_t *data, size_t len) {
   if (type == WS_EVT_CONNECT) {
-    Serial.printf("WebSocket client #%u connected\n", client->id());
   } else if (type == WS_EVT_DISCONNECT) {
-    Serial.printf("WebSocket client #%u disconnected\n", client->id());
   } else if (type == WS_EVT_DATA) {
     handleWebSocketMessage(arg, data, len);
   }
@@ -315,9 +411,7 @@ void executeGearCommand(const GcodeCommand& cmd) {
 
 void TaskGcodeExec(void *pvParameters) {
   // while (!gcodeReady) vTaskDelay(pdMS_TO_TICKS(100));
-  
   struct GcodeCommand cmd;
-  
   for (;;) {
     // xSemaphoreTake(ExecuteGearSemaphore, portMAX_DELAY);
     if (xQueuePeek(queGear, &cmd, pdMS_TO_TICKS(100)) != pdPASS) {
@@ -333,7 +427,8 @@ void TaskGcodeExec(void *pvParameters) {
       y_s = cmd.nextY;
       theta_s = (cmd.nextX-x)!=0? tanh((cmd.nextY-y)/(cmd.nextX-x)): 0; //RECTANGLE ONLY!!!
       xSemaphoreTake(printMutex, portMAX_DELAY);
-      ws.textAll("EXEC GCODE: X: " + String(cmd.nextX) + " Y: " + String(cmd.nextY));
+      ws.textAll("EXEC GCODE: X: " + String(x_s) + " Y: " + String(y_s));
+      Serial.println("EXEC GCODE: X: " + String(x_s) + " Y: " + String(y_s));
       ws.textAll("MARKER " + String(stepper.markerDown ? "DOWN" : "UP"));
       ws.textAll("COLOR " + String(stepper.color));
       xSemaphoreGive(printMutex);
@@ -373,23 +468,74 @@ void TaskStepperGcodeExec(void *pvParameters) {
 }
 
 // ====== SERIAL COMMANDS ======
-void SerialCommandTask(void *pv) {
-  while (true) {
-    if (Serial.available()) {
-      String cmd = Serial.readStringUntil('\n');
-      cmd.trim();
+void processCommand(String cmd) {
+  cmd.trim();
+  
+  if (cmd.length() > 0) {
+    char cmdType = cmd.charAt(0);
+    
+    if (cmdType == 'S' || cmdType == 's') {
+      double newX, newY, thetaDeg;
+      int count = sscanf(cmd.c_str() + 1, "%lf %lf %lf", &newX, &newY, &thetaDeg);
       
-      if (cmd.length() > 0 && (cmd.charAt(0) == 'S' || cmd.charAt(0) == 's')) {
-        double newX, newY, thetaDeg;
-        if (sscanf(cmd.c_str() + 1, "%lf %lf %lf", &newX, &newY, &thetaDeg) == 3) {
-          x_s = newX;
-          y_s = newY;
-          theta_s = wrapAngle(thetaDeg * M_PI / 180.0);
-          Serial.printf("✅ Setpoint: X=%.3f Y=%.3f Θ=%.2f°\n", x_s, y_s, thetaDeg);
-        }
+      if (count == 3) {
+        x_s = newX;
+        y_s = newY;
+        theta_s = wrapAngle(thetaDeg * M_PI / 180.0);
+        currentNavState = 0;
+        Serial.printf("✅ New setpoint: X=%.3f m, Y=%.3f m, Theta=%.2f°\n", x_s, y_s, thetaDeg);
+        ws.textAll("{\"response\":\"Setpoint updated\"}");
       }
     }
-    vTaskDelay(pdMS_TO_TICKS(100));
+    else if (cmdType == 'C' || cmdType == 'c') {
+      double newKp_rho, newKp_alpha, newKp_theta;
+      int count = sscanf(cmd.c_str() + 1, "%lf %lf %lf", &newKp_rho, &newKp_alpha, &newKp_theta);
+      
+      if (count == 3) {
+        Kp_rho = newKp_rho;
+        Kp_alpha = newKp_alpha;
+        Kp_theta = newKp_theta;
+        Serial.printf("✅ Controller gains updated\n");
+        ws.textAll("{\"response\":\"Controller gains updated\"}");
+      }
+    }
+    else if (cmdType == 'D' || cmdType == 'd') {
+      double newKp, newKi, newKd;
+      int count = sscanf(cmd.c_str() + 1, "%lf %lf %lf", &newKp, &newKi, &newKd);
+      
+      if (count == 3) {
+        Kp = newKp;
+        Ki = newKi;
+        Kd = newKd;
+        Serial.printf("✅ PID gains updated\n");
+        ws.textAll("{\"response\":\"PID gains updated\"}");
+      }
+    }
+    else if (cmdType == 'T' || cmdType == 't') {
+      double newS;
+      int count = sscanf(cmd.c_str() + 2, "%lf", &newS);
+      
+      if (count == 1 && newS > 0) {
+        S_param = newS;
+        Serial.printf("✅ S_param updated to %.3f\n", S_param);
+        ws.textAll("{\"response\":\"S_param updated\"}");
+      }
+    }
+    else if (cmdType == 'P' || cmdType == 'p') {
+      double newX, newY, thetaDeg;
+      int count = sscanf(cmd.c_str() + 1, "%lf %lf %lf", &newX, &newY, &thetaDeg);
+      
+      if (count == 3) {
+        x = newX;
+        y = newY;
+        theta = wrapAngle(thetaDeg * M_PI / 180.0);
+        encLeft.clearCount();
+        encRight.clearCount();
+        currentNavState = 0;
+        Serial.printf("✅ Position reset\n");
+        ws.textAll("{\"response\":\"Position reset\"}");
+      }
+    }
   }
 }
 
@@ -410,7 +556,8 @@ void encoderTask(void *pv) {
   for (;;) {
     long currL = encLeft.getCount() * ENC_L_DIR;
     long currR = encRight.getCount() * ENC_R_DIR;
-    
+    currentEncL = currL;
+    currentEncR = currR;
     long dL = currL - prevL;
     long dR = currR - prevR;
     prevL = currL;
@@ -533,7 +680,6 @@ void pidTask(void *pv) {
     //               set_L, input_L, errorL, output_L,
     //               set_R, input_R, errorR, output_R);
 
-    ws.textAll("PWM");
     if (set_L >0 || set_R > 0) {
       ws.textAll("Left " + String(set_L));
       ws.textAll("Right " + String(set_R));
@@ -545,8 +691,8 @@ void pidTask(void *pv) {
     
     // Serial.printf("PWM: LEFT=%d RIGHT=%d\n\n", pwmL, pwmR);
 
-    // motorWrite(true, pwmL);
-    // motorWrite(false, pwmR);
+    motorWrite(true, pwmL);
+    motorWrite(false, pwmR);
 
     vTaskDelay(pdMS_TO_TICKS(LOOP_DT_MS));
   }
@@ -880,7 +1026,7 @@ void navigationTask(void *pv) {
         
         vTaskDelay(pdMS_TO_TICKS(LOOP_DT_MS * 2));
     
-        String posMsg = "POSITION x=" + String(x, 3) + " y=" + String(y, 3) + 
+      String posMsg = "POSITION x=" + String(x, 3) + " y=" + String(y, 3) + 
                     " theta=" + String(theta * 180.0 / M_PI, 1);
      ws.textAll(posMsg);
       
@@ -911,6 +1057,49 @@ void TaskWebServer(void *pvParameters) {
   }
 }
 
+void sendTelemetry() {
+  if (ws.count() == 0) return;
+  
+  static unsigned long lastSendTime = 0;
+  unsigned long now = millis();
+  if (now - lastSendTime < 100) return; // Max 10 Hz (was 25 Hz)
+  lastSendTime = now;
+  
+  const char* stateNames[] = {"ROTATE_TO_GOAL", "DRIVE_TO_GOAL", "ROTATE_TO_FINAL", "GOAL_REACHED"};
+  
+  String json = "{";
+  json += "\"x\":" + String(x, 3) + ",";
+  json += "\"y\":" + String(y, 3) + ",";
+  json += "\"theta\":" + String(theta * 180.0 / M_PI, 2) + ",";
+  json += "\"x_s\":" + String(x_s, 3) + ",";
+  json += "\"y_s\":" + String(y_s, 3) + ",";
+  json += "\"theta_s\":" + String(theta_s * 180.0 / M_PI, 2) + ",";
+  json += "\"rawL\":" + String(output_L, 3) + ",";
+  json += "\"rawR\":" + String(output_R, 3) + ",";
+  
+  double dx = x_s - x;
+  double dy = y_s - y;
+  double rho = sqrt(dx*dx + dy*dy);
+  double dtheta = wrapAngle(theta_s - theta);
+  
+  json += "\"error_dist\":" + String(rho, 4) + ",";
+  json += "\"error_angle\":" + String(dtheta * 180.0 / M_PI, 2) + ",";
+  
+  int pwmL = remapPID(output_L, isRotatingInPlace);
+  int pwmR = remapPID(output_R, isRotatingInPlace);
+  
+  json += "\"pwm_left\":" + String(pwmL) + ",";
+  json += "\"pwm_right\":" + String(pwmR) + ",";
+  json += "\"set_L\":" + String(set_L, 3) + ",";
+  json += "\"set_R\":" + String(set_R, 3) + ",";
+  json += "\"enc_left\":" + String(currentEncL) + ",";
+  json += "\"enc_right\":" + String(currentEncR) + ",";
+  json += "\"state\":" + String(currentNavState) + ",";
+  json += "\"state_name\":\"" + String(stateNames[currentNavState]) + "\"";
+  json += "}";
+  
+  ws.textAll(json);
+}
 // ====== SETUP ======
 void setup() {
   Serial.begin(115200);
@@ -926,7 +1115,7 @@ void setup() {
   
   WifiClient wifi;
   Serial.print("ESP IP: ");
-  Serial.println(wifi.connectWiFi(ssid, password));
+  Serial.println(wifi.connectWiFi(ssid, password, incommon_ca));
   
   Serial.println("Initializing OTOS...");
   myOtos.begin();
@@ -969,13 +1158,757 @@ void setup() {
   
   Serial.println("Starting tasks...");
   delay(2000);
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/html", R"rawliteral(
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Robot Telemetry</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+          font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+          background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+          color: #fff;
+          padding: 20px;
+          min-height: 100vh;
+        }
+        
+        .container {
+          max-width: 1200px;
+          margin: 0 auto;
+        }
+        
+        h1 {
+          text-align: center;
+          margin-bottom: 30px;
+          font-size: 2.5em;
+          text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .status-badge {
+          display: inline-block;
+          padding: 8px 16px;
+          border-radius: 20px;
+          font-size: 0.9em;
+          font-weight: bold;
+          margin-left: 15px;
+          animation: pulse 2s infinite;
+        }
+        
+        .status-connected {
+          background: #4caf50;
+        }
+        
+        .status-disconnected {
+          background: #f44336;
+        }
+        
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.7; }
+        }
+        
+        .grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+          gap: 20px;
+          margin-bottom: 20px;
+        }
+        
+        .card {
+          background: rgba(255, 255, 255, 0.1);
+          backdrop-filter: blur(10px);
+          border-radius: 15px;
+          padding: 25px;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+          border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        
+        .card h2 {
+          font-size: 1.4em;
+          margin-bottom: 20px;
+          color: #ffd700;
+          border-bottom: 2px solid rgba(255, 215, 0, 0.3);
+          padding-bottom: 10px;
+        }
+        
+        .metric {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 12px 0;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .metric:last-child {
+          border-bottom: none;
+        }
+        
+        .metric-label {
+          font-weight: 600;
+          color: #e0e0e0;
+        }
+        
+        .metric-value {
+          font-size: 1.3em;
+          font-weight: bold;
+          color: #fff;
+          font-family: 'Courier New', monospace;
+        }
+        
+        .unit {
+          font-size: 0.8em;
+          color: #b0b0b0;
+          margin-left: 5px;
+        }
+        
+        .pwm-bar-container {
+          margin-top: 8px;
+          background: rgba(0, 0, 0, 0.3);
+          border-radius: 10px;
+          height: 20px;
+          overflow: hidden;
+          position: relative;
+        }
+        
+        .pwm-bar {
+          height: 100%;
+          transition: width 0.3s ease;
+          border-radius: 10px;
+        }
+        
+        .pwm-bar.positive {
+          background: linear-gradient(90deg, #4caf50, #8bc34a);
+          float: left;
+        }
+        
+        .pwm-bar.negative {
+          background: linear-gradient(90deg, #ff5722, #f44336);
+          float: right;
+        }
+        
+        .pwm-label {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          font-size: 0.85em;
+          font-weight: bold;
+          text-shadow: 1px 1px 2px rgba(0,0,0,0.8);
+        }
+        
+        .error-warning {
+          color: #ff6b6b;
+          font-weight: bold;
+        }
+        
+        .error-ok {
+          color: #51cf66;
+        }
+        
+        .visualizer {
+          grid-column: 1 / -1;
+          height: 400px;
+          position: relative;
+          background: rgba(0, 0, 0, 0.2);
+          border: 2px solid rgba(255, 255, 255, 0.2);
+          overflow: hidden;
+        }
+        
+        .input-group {
+          margin: 15px 0;
+        }
+        
+        .input-group label {
+          display: block;
+          margin-bottom: 8px;
+          font-weight: 600;
+          color: #e0e0e0;
+        }
+        
+        .input-group input {
+          width: 100%;
+          padding: 12px;
+          border-radius: 8px;
+          border: 2px solid rgba(255, 255, 255, 0.2);
+          background: rgba(0, 0, 0, 0.3);
+          color: #fff;
+          font-size: 1em;
+          font-family: 'Courier New', monospace;
+        }
+        
+        .input-group input:focus {
+          outline: none;
+          border-color: #ffd700;
+        }
+        
+        button {
+          width: 100%;
+          padding: 12px;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          border: none;
+          border-radius: 8px;
+          font-size: 1.1em;
+          font-weight: bold;
+          cursor: pointer;
+          transition: transform 0.2s;
+          margin-top: 10px;
+        }
+        
+        button:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        button:active {
+          transform: translateY(0);
+        }
+        
+        .command-output {
+          margin-top: 10px;
+          padding: 10px;
+          background: rgba(0, 0, 0, 0.3);
+          border-radius: 8px;
+          min-height: 80px;
+          max-height: 150px;
+          overflow-y: auto;
+          font-family: 'Courier New', monospace;
+          font-size: 0.9em;
+        }
+        
+        .command-output div {
+          padding: 4px 0;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        
+        .help-text {
+          font-size: 0.85em;
+          color: #b0b0b0;
+          margin-top: 8px;
+          line-height: 1.4;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>
+          🤖 Robot Navigation Telemetry
+          <span id="status" class="status-badge status-disconnected">DISCONNECTED</span>
+        </h1>
+        
+        <div class="grid">
+          <!-- Position Card -->
+          <div class="card">
+            <h2>📍 Current Position</h2>
+            <div class="metric">
+              <span class="metric-label">X Position:</span>
+              <span class="metric-value"><span id="pos-x">0.000</span><span class="unit">m</span></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Y Position:</span>
+              <span class="metric-value"><span id="pos-y">0.000</span><span class="unit">m</span></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Heading (θ):</span>
+              <span class="metric-value"><span id="pos-theta">0.0</span><span class="unit">°</span></span>
+            </div>
+          </div>
+          
+          <!-- Navigation State Card -->
+          <div class="card">
+            <h2>🧭 Navigation State</h2>
+            <div class="metric">
+              <span class="metric-label">Current State:</span>
+              <span class="metric-value" id="nav-state" style="font-size: 1.1em;">UNKNOWN</span>
+            </div>
+            <div style="margin-top: 15px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+              <div style="font-size: 0.9em; color: #b0b0b0;">
+                <div id="state-desc">Waiting for data...</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Target Card -->
+          <div class="card">
+            <h2>🎯 Target Setpoint</h2>
+            <div class="metric">
+              <span class="metric-label">Target X:</span>
+              <span class="metric-value"><span id="target-x">0.000</span><span class="unit">m</span></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Target Y:</span>
+              <span class="metric-value"><span id="target-y">0.000</span><span class="unit">m</span></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Target θ:</span>
+              <span class="metric-value"><span id="target-theta">0.0</span><span class="unit">°</span></span>
+            </div>
+          </div>
+          
+          <!-- Errors Card -->
+          <div class="card">
+            <h2>⚠️ Position Errors</h2>
+            <div class="metric">
+              <span class="metric-label">Distance Error:</span>
+              <span class="metric-value" id="error-dist-display">
+                <span id="error-dist">0.0000</span><span class="unit">m</span>
+              </span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Distance (cm):</span>
+              <span class="metric-value">
+                <span id="error-dist-cm">0.0</span><span class="unit">cm</span>
+              </span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Angle Error:</span>
+              <span class="metric-value" id="error-angle-display">
+                <span id="error-angle">0.0</span><span class="unit">°</span>
+              </span>
+            </div>
+          </div>
+          
+          <!-- Encoder Values Card -->
+          <div class="card">
+            <h2>🔢 Encoder Values</h2>
+            <div class="metric">
+              <span class="metric-label">Left Encoder:</span>
+              <span class="metric-value"><span id="enc-left">0</span><span class="unit">ticks</span></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Right Encoder:</span>
+              <span class="metric-value"><span id="enc-right">0</span><span class="unit">ticks</span></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Left Velocity:</span>
+              <span class="metric-value"><span id="vel-left">0.000</span><span class="unit">rev/s</span></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Right Velocity:</span>
+              <span class="metric-value"><span id="vel-right">0.000</span><span class="unit">rev/s</span></span>
+            </div>
+          </div>
+          
+          <!-- Motor Control Card -->
+          <div class="card">
+            <h2>⚡ Motor Control</h2>
+            <div class="metric">
+              <span class="metric-label">Left Motor PWM:</span>
+              <span class="metric-value"><span id="pwm-left">0</span></span>
+            </div>
+            <div class="pwm-bar-container">
+              <div class="pwm-bar" id="pwm-bar-left"></div>
+              <span class="pwm-label" id="pwm-label-left">0</span>
+            </div>
+            
+            <div class="metric" style="margin-top: 15px;">
+              <span class="metric-label">Right Motor PWM:</span>
+              <span class="metric-value"><span id="pwm-right">0</span></span>
+            </div>
+            <div class="pwm-bar-container">
+              <div class="pwm-bar" id="pwm-bar-right"></div>
+              <span class="pwm-label" id="pwm-label-right">0</span>
+            </div>
+            
+            <div class="metric" style="margin-top: 15px;">
+              <span class="metric-label">Left Setpoint:</span>
+              <span class="metric-value"><span id="set-l">0.000</span><span class="unit">rev/s</span></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Right Setpoint:</span>
+              <span class="metric-value"><span id="set-r">0.000</span><span class="unit">rev/s</span></span>
+            </div>
+          </div>
+
+          <!-- Raw Wheel Measurements -->
+          <div class="card">
+            <h2>📡 Raw Wheel Data</h2>
+            <div class="metric">
+              <span class="metric-label">Raw Left (rawL):</span>
+              <span class="metric-value"><span id="raw-l">0</span></span>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Raw Right (rawR):</span>
+              <span class="metric-value"><span id="raw-r">0</span></span>
+            </div>
+          </div>
+
+          <!-- Set Target Interface -->
+          <div class="card">
+            <h2>🎮 Set New Target</h2>
+            <div class="input-group">
+              <label>X (m):</label>
+              <input id="inputX" type="number" step="0.01" placeholder="0.00">
+            </div>
+            <div class="input-group">
+              <label>Y (m):</label>
+              <input id="inputY" type="number" step="0.01" placeholder="0.00">
+            </div>
+            <div class="input-group">
+              <label>Theta (°):</label>
+              <input id="inputTheta" type="number" step="1" placeholder="0">
+            </div>
+            <button onclick="sendSetpoint()">Send Setpoint</button>
+          </div>
+
+          <!-- Command Input Card -->
+          <div class="card">
+            <h2>⌨️ Serial Command Input</h2>
+            <div class="input-group">
+              <label>Enter Command:</label>
+              <input id="commandInput" type="text" placeholder="S 0.2 0.2 45" onkeypress="if(event.key==='Enter')sendCommand()">
+            </div>
+            <button onclick="sendCommand()">Send Command</button>
+            <div class="help-text">
+              <strong>Available Commands:</strong><br>
+              • S x y theta - Set setpoint<br>
+              • P x y theta - Reset position<br>
+              • C Kp_rho Kp_alpha Kp_theta - Set controller gains<br>
+              • D Kp Ki Kd - Set PID gains<br>
+              • T S_value - Set tanh parameter
+            </div>
+            <div class="command-output" id="commandOutput">
+              <div style="color: #888;">Command responses will appear here...</div>
+            </div>
+          </div>
+          
+          <!-- Visualization -->
+          <div class="card visualizer">
+            <canvas id="canvas" width="800" height="400"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <script>
+        // ========== IMPROVED WEBSOCKET CONNECTION ==========
+        
+        const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+        const host = window.location.hostname;
+        const port = window.location.port || '80';
+        const wsUrl = protocol + host + (port ? ':' + port : '') + '/ws';
+        
+        console.log('🔌 Connecting to WebSocket at:', wsUrl);
+        
+        let ws;
+        let reconnectInterval;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 10;
+        
+        function connectWebSocket() {
+          try {
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+              console.log('✅ WebSocket connected successfully');
+              reconnectAttempts = 0;
+              document.getElementById('status').textContent = 'CONNECTED';
+              document.getElementById('status').className = 'status-badge status-connected';
+              
+              if (reconnectInterval) {
+                clearInterval(reconnectInterval);
+              }
+              reconnectInterval = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                  ws.send('ping');
+                }
+              }, 5000);
+            };
+            
+            ws.onclose = function(event) {
+              console.log('❌ WebSocket disconnected. Code:', event.code, 'Reason:', event.reason || 'No reason given');
+              document.getElementById('status').textContent = 'DISCONNECTED';
+              document.getElementById('status').className = 'status-badge status-disconnected';
+              
+              if (reconnectInterval) {
+                clearInterval(reconnectInterval);
+              }
+              
+              if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                reconnectAttempts++;
+                console.log(`🔄 Reconnecting... Attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS}`);
+                setTimeout(connectWebSocket, 2000);
+              } else {
+                console.error('❌ Max reconnection attempts reached. Please refresh the page.');
+                addCommandOutput('❌ Connection lost. Please refresh the page.');
+              }
+            };
+            
+            ws.onerror = function(error) {
+              console.error('⚠️ WebSocket error:', error);
+              addCommandOutput('⚠️ WebSocket error occurred');
+            };
+            
+            ws.onmessage = function(event) {
+              try {
+                const data = JSON.parse(event.data);
+                if (data.response) {
+                  addCommandOutput(data.response);
+                } else {
+                  updateTelemetry(data);
+                }
+              } catch (e) {
+                console.log('📨 Non-JSON message:', event.data);
+              }
+            };
+            
+          } catch (error) {
+            console.error('❌ Failed to create WebSocket:', error);
+            addCommandOutput('❌ Failed to connect: ' + error.message);
+          }
+        }
+        
+        connectWebSocket();
+        
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        const SCALE = 1000;
+        const ORIGIN_X = canvas.width / 2;
+        const ORIGIN_Y = canvas.height / 2;
+
+        function sendSetpoint() {
+          let x = parseFloat(document.getElementById("inputX").value);
+          let y = parseFloat(document.getElementById("inputY").value);
+          let theta = parseFloat(document.getElementById("inputTheta").value);
+
+          if (isNaN(x) || isNaN(y) || isNaN(theta)) {
+            addCommandOutput("❌ Invalid input values");
+            return;
+          }
+
+          let msg = {
+            cmd: "setpoint",
+            x: x,
+            y: y,
+            theta: theta
+          };
+
+          ws.send(JSON.stringify(msg));
+          addCommandOutput(`✅ Setpoint sent: X=${x}, Y=${y}, θ=${theta}°`);
+        }
+
+        function sendCommand() {
+          const input = document.getElementById("commandInput");
+          const command = input.value.trim();
+          
+          if (command === "") {
+            addCommandOutput("❌ Please enter a command");
+            return;
+          }
+
+          const msg = {
+            cmd: "command",
+            text: command
+          };
+
+          ws.send(JSON.stringify(msg));
+          addCommandOutput(`📤 Sent: ${command}`);
+          input.value = "";
+        }
+
+        function addCommandOutput(text) {
+          const output = document.getElementById("commandOutput");
+          const div = document.createElement("div");
+          div.textContent = text;
+          output.appendChild(div);
+          output.scrollTop = output.scrollHeight;
+          
+          while (output.children.length > 10) {
+            output.removeChild(output.firstChild);
+          }
+        }
+        
+        function updateTelemetry(data) {
+          document.getElementById('pos-x').textContent = data.x.toFixed(5);
+          document.getElementById('pos-y').textContent = data.y.toFixed(5);
+          document.getElementById('pos-theta').textContent = data.theta.toFixed(1);
+          
+          if (data.enc_left !== undefined) {
+            document.getElementById("enc-left").textContent = data.enc_left;
+          }
+          if (data.enc_right !== undefined) {
+            document.getElementById("enc-right").textContent = data.enc_right;
+          }
+          
+          if (data.set_L !== undefined) {
+            document.getElementById("vel-left").textContent = data.set_L.toFixed(3);
+          }
+          if (data.set_R !== undefined) {
+            document.getElementById("vel-right").textContent = data.set_R.toFixed(3);
+          }
+          
+          if (data.rawL !== undefined) {
+            document.getElementById("raw-l").textContent = data.rawL.toFixed(0);
+          }
+          if (data.rawR !== undefined) {
+            document.getElementById("raw-r").textContent = data.rawR.toFixed(0);
+          }
+          
+          document.getElementById('target-x').textContent = data.x_s.toFixed(3);
+          document.getElementById('target-y').textContent = data.y_s.toFixed(3);
+          document.getElementById('target-theta').textContent = data.theta_s.toFixed(1);
+          
+          document.getElementById('nav-state').textContent = data.state_name;
+          
+          const stateDescriptions = {
+            'ROTATE_TO_GOAL': '🔄 Rotating to face the target position',
+            'DRIVE_TO_GOAL': '🚗 Driving towards target position',
+            'ROTATE_TO_FINAL': '🔄 Rotating to match target heading angle',
+            'GOAL_REACHED': '✅ At goal position - holding steady'
+          };
+          document.getElementById('state-desc').textContent = stateDescriptions[data.state_name] || 'Unknown state';
+          
+          const stateElement = document.getElementById('nav-state');
+          if (data.state_name === 'GOAL_REACHED') {
+            stateElement.style.color = '#51cf66';
+          } else if (data.state_name === 'DRIVE_TO_GOAL') {
+            stateElement.style.color = '#ffd700';
+          } else {
+            stateElement.style.color = '#fff';
+          }
+          
+          const distError = data.error_dist;
+          const angleError = Math.abs(data.error_angle);
+          
+          document.getElementById('error-dist').textContent = distError.toFixed(4);
+          document.getElementById('error-dist-cm').textContent = (distError * 100).toFixed(1);
+          document.getElementById('error-angle').textContent = data.error_angle.toFixed(1);
+          
+          const distDisplay = document.getElementById('error-dist-display');
+          const angleDisplay = document.getElementById('error-angle-display');
+          
+          if (distError < 0.01) {
+            distDisplay.className = 'metric-value error-ok';
+          } else {
+            distDisplay.className = 'metric-value error-warning';
+          }
+          
+          if (angleError < 5) {
+            angleDisplay.className = 'metric-value error-ok';
+          } else {
+            angleDisplay.className = 'metric-value error-warning';
+          }
+          
+          updatePWM('left', data.pwm_left);
+          updatePWM('right', data.pwm_right);
+          
+          document.getElementById('set-l').textContent = data.set_L.toFixed(3);
+          document.getElementById('set-r').textContent = data.set_R.toFixed(3);
+          
+          drawRobot(data);
+        }
+        
+        function updatePWM(side, value) {
+          document.getElementById(`pwm-${side}`).textContent = value;
+          document.getElementById(`pwm-label-${side}`).textContent = value;
+          
+          const bar = document.getElementById(`pwm-bar-${side}`);
+          const percent = Math.abs(value) / 255 * 100;
+          
+          bar.style.width = percent + '%';
+          bar.className = 'pwm-bar ' + (value >= 0 ? 'positive' : 'negative');
+        }
+        
+        function drawRobot(data) {
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+          ctx.lineWidth = 1;
+          for (let i = -canvas.width; i < canvas.width; i += 50) {
+            ctx.beginPath();
+            ctx.moveTo(ORIGIN_X + i, 0);
+            ctx.lineTo(ORIGIN_X + i, canvas.height);
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.moveTo(0, ORIGIN_Y + i);
+            ctx.lineTo(canvas.width, ORIGIN_Y + i);
+            ctx.stroke();
+          }
+          
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(ORIGIN_X, 0);
+          ctx.lineTo(ORIGIN_X, canvas.height);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(0, ORIGIN_Y);
+          ctx.lineTo(canvas.width, ORIGIN_Y);
+          ctx.stroke();
+          
+          const robotX = ORIGIN_X + data.x * SCALE;
+          const robotY = ORIGIN_Y - data.y * SCALE;
+          
+          const targetX = ORIGIN_X + data.x_s * SCALE;
+          const targetY = ORIGIN_Y - data.y_s * SCALE;
+          
+          ctx.fillStyle = '#ff6b6b';
+          ctx.shadowBlur = 20;
+          ctx.shadowColor = '#ff6b6b';
+          ctx.beginPath();
+          ctx.arc(targetX, targetY, 12, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          
+          const targetHeadingRad = data.theta_s * Math.PI / 180;
+          ctx.strokeStyle = '#ff6b6b';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(targetX, targetY);
+          ctx.lineTo(targetX + Math.cos(targetHeadingRad) * 25, 
+                    targetY - Math.sin(targetHeadingRad) * 25);
+          ctx.stroke();
+          
+          ctx.fillStyle = '#4caf50';
+          ctx.shadowBlur = 20;
+          ctx.shadowColor = '#4caf50';
+          ctx.beginPath();
+          ctx.arc(robotX, robotY, 15, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          
+          const headingRad = data.theta * Math.PI / 180;
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(robotX, robotY);
+          ctx.lineTo(robotX + Math.cos(headingRad) * 30, 
+                    robotY - Math.sin(headingRad) * 30);
+          ctx.stroke();
+          
+          ctx.strokeStyle = 'rgba(255, 255, 0, 0.5)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
+          ctx.beginPath();
+          ctx.moveTo(robotX, robotY);
+          ctx.lineTo(targetX, targetY);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        
+        drawRobot({
+          x: 0, y: 0, theta: 90,
+          x_s: 0, y_s: 0, theta_s: 0
+        });
+      </script>
+    </body>
+    </html>
+        )rawliteral");
+      });
+  
   
   xTaskCreatePinnedToCore(encoderTask, "Encoders", 4096, NULL, 3, NULL, 1);               // priority of 2
   xTaskCreatePinnedToCore(pidTask, "PID", 4096, NULL, 2, NULL, 1);                        // priority of 2
   // xTaskCreatePinnedToCore(stepperTask, "Stepper", 4096, NULL, 1, NULL, 0);                // priority of 1
   xTaskCreatePinnedToCore(velocityTask, "Velocity", 4096, NULL, 1, NULL, 0);              // priority of 1
   xTaskCreatePinnedToCore(navigationTask, "Nav", 4096, NULL, 2, NULL, 1);                 // priority of 1
-  // xTaskCreatePinnedToCore(SerialCommandTask, "Serial", 4096, NULL, 2, NULL, 1);
   xTaskCreatePinnedToCore(TaskGcodeParse, "GcodeParse", 4096, NULL, 2, &task_gcode_parse, 1);          // priority of 2
   xTaskCreatePinnedToCore(TaskGcodeExec, "GcodeExec", 4096, NULL, 2, NULL, 1);            // priority of 2
   // xTaskCreatePinnedToCore(TaskStepperGcodeExec, "StepperExec", 4096, NULL, 2, NULL, 0);   // priority of 2
