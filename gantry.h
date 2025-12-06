@@ -1,8 +1,8 @@
 // *** LIBRARIES ***
-// #include "DRV8825.h"  // DRV8825 library for stepper motor control
-// #include <Arduino.h>
-#include "ESP32Servo.h"    // servo library for ESP32
-//#include "Servo.h"      // servo library for Arduino (prototype testing)
+#include "DRV8825.h"  // DRV8825 library for stepper motor control
+#include <Arduino.h>
+//#include <Servo.h>
+#include "ESP32Servo.h"    // servo library for ESP32#include "Servo.h"      // servo library for Arduino (prototype testing)
 #include <math.h>
 
 // ========================
@@ -16,24 +16,24 @@ class GANTRY {
     int TOOL_EXTEND = 0;
     int GRAB = 10;
     int RELEASE = 90;
-    int UP = 90;
-    int DOWN = 110;
+    int UP = 80;
+    int DOWN = 150;
   
     // CAN BE CHANGED
-    int waitTime = 350;   // delay time between commands
-    int scale = 30;
-
+    int waitTime = 5;   // delay time between commands
+    int scale = 1;
+    
     // NUMBERS FOR PRECISION
     int tot_num_steps = 200;
     int wait = 0;
     double radius = 6.0;    // in mm
-    double circumference = 2*PI*radius;   // in mm
-    double step_dist = 2*PI*radius / 200;
+    double circumference = 2*M_PI*radius;   // in mm
+    double step_dist = 2*M_PI*radius / 200;
 
     Servo z_axis;       // servo for z axis movement (underneath gripper)
     Servo gripper;      // servo for grippers
     Servo tool_change;  // servo for tool change rack
-    // DRV8825 gantry;     // STEPPER MOTOR FOR GANTRY
+    DRV8825 gantry;     // STEPPER MOTOR FOR GANTRY
 
     // private marker helper functions
     // puts marker back into tool changing rack

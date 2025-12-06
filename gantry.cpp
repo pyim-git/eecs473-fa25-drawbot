@@ -2,11 +2,11 @@
 #include "gantry.h"
 
 // DEFINE PINS
-#define DIR 11
-#define STEP 9
-#define EN 10
-#define RST 21
-#define SLP 14
+#define DIR 11 //1 
+#define STEP 9 // 2
+#define EN 10 //35
+#define RST 21 // 36
+#define SLP 14 //37
 
 // NOTE: IF NOT USING .H FILE - COPY THESE OTHER .H FILES INTO TOP
 // EVERYTHING SHOULD WORK AND BE USUABLE
@@ -27,18 +27,32 @@
 // move marker to the right (from robot's perspective)
 // function takes in a distance in mm and speed in mm/s
 void GANTRY::moveRight(float distance, float speed) {
+  Serial.print("moveRight command: ");
+  Serial.println(distance);
   // wake up gantry - only allowed if sleep pin set
-  // gantry.wakup();
+  gantry.wakeup();
+  if (!gantry.isSleeping()) {
+     Serial.println("Gantry Awake!");
+  }
+
+  // wake up stepper
+  // digitalWrite(SLP, HIGH);
   
   // set direction to be clockwise (moving right)
-  // gantry.setDirection(DRV8825_CLOCK_WISE);
-  digitalWrite(DIR, LOW);
+  gantry.setDirection(DRV8825_CLOCK_WISE);
+  Serial.print("Direction = ");
+  Serial.println(gantry.getDirection());
+  // digitalWrite(DIR, LOW);
 
   // Calculate number of steps
   int num_steps = distance/step_dist;
+  Serial.print("Number of steps = ");
+  Serial.println(num_steps);
 
   // calculate delay needed for specific speed
   wait = 1000*step_dist / speed;
+  Serial.print("wait = ");
+  Serial.println(wait);
 
   // Serial.println("Moving gantry arm right!");
   for (int i = 0; i < num_steps; i++) {
@@ -53,56 +67,80 @@ void GANTRY::moveRight(float distance, float speed) {
   // add a little bit of delay to separate commands
   delay(waitTime);
   
-  // // update position value
-  // if (position + distance <= BELT_LENGTH) {
-  //   position += distance;
-  // } // if ..position not hit zero
+  // update position value
+  if (position + distance <= BELT_LENGTH) {
+    position += distance;
+  } // if ..position not hit zero
   
-  // else {
-  //   position == BELT_LENGTH;
-  // } // else ..position hits leftmost
+  else {
+    position == BELT_LENGTH;
+  } // else ..position hits leftmost
+
+  // sleep stepper
+  // digitalWrite(SLP, LOW);
+  gantry.sleep();
+    if (gantry.isSleeping()) {
+     Serial.println("Gantry Asleep!");
+  }
+
+  Serial.println("moveRight command done!");
 } // ..moveRight()
 
 // move marker to the left (from robot's perspective)
 // function takes in a distance in mm and speed in mm/s
 void GANTRY::moveLeft(float distance, float speed) {
+  Serial.print("moveLeft command: ");
+  Serial.println(distance);
   // wake up gantry - only allowed if sleep pin set
-  // gantry.wakup();
-
-  // set direction to be counterclockwise (moving left)
-  // gantry.setDirection(DRV8825_COUNTER_CLOCK_WISE);
-  digitalWrite(DIR, HIGH);
+  gantry.wakeup();
+  if (!gantry.isSleeping()) { Serial.println("Gantry Awake!");}
+  // wake up stepper
+  // digitalWrite(SLP, HIGH);
+  
+  // set direction to be clockwise (moving left)
+  gantry.setDirection(DRV8825_COUNTERCLOCK_WISE);
+  Serial.print("Direction = ");
+  Serial.println(gantry.getDirection());
+  // digitalWrite(DIR, LOW);
 
   // Calculate number of steps
   int num_steps = distance/step_dist;
+  Serial.print("Number of steps = ");
+  Serial.println(num_steps);
 
   // calculate delay needed for specific speed
   wait = 1000*step_dist / speed;
+  Serial.print("wait = ");
+  Serial.println(wait);
 
-  // Serial.println("Moving gantry arm left!");
+  // Serial.println("Moving gantry arm right!");
   for (int i = 0; i < num_steps; i++) {
     // gantry.step();
     // delay(wait);
     digitalWrite(STEP, HIGH);
-    delay(wait);
+    delay(waitTime);
     digitalWrite(STEP, LOW);
-    delay(wait);
+    delay(waitTime);
   } // for ..move number of required steps
-  
-  // put gantry to sleep - only allowed if sleep pin set
-  // gantry.sleep();
-  
+
   // add a little bit of delay to separate commands
   delay(waitTime);
-
-  // // update position value
-  // if (position - distance >= 0) {
-  //   position -= distance;
-  // } // if ..position not hit zero
   
-  // else {
-  //   position == 0.0;
-  // } // else ..position hits leftmost
+  // update position value
+  if (position + distance <= BELT_LENGTH) {
+    position += distance;
+  } // if ..position not hit zero
+  
+  else {
+    position == BELT_LENGTH;
+  } // else ..position hits leftmost
+
+  // sleep stepper
+  // digitalWrite(SLP, LOW);
+  gantry.sleep();
+  if (gantry.isSleeping()) { Serial.println("Gantry Awake!");}
+
+  Serial.println("moveLeft command done!");
 } // ..moveLeft()
 
 // puts marker back into tool changing rack
@@ -113,8 +151,8 @@ void GANTRY::putMarkerBack(int pos) {
 
   // move gripper to position you want
   // CHANGE THIS WHEN TESTING TO GET BEST POSITION
-  if (pos == 2) { moveRight(50*scale, 50); }
-  else if (pos == 3) { moveRight(100*scale, 50); }
+  if (pos == 2) { moveRight(500, 50); }
+  else if (pos == 3) { moveRight(1000, 50); }
 
   // marker currently in gripper
   // have tool rack grab marker
@@ -174,26 +212,33 @@ void GANTRY::release() {
 // CALL THIS FUNCTION IN SETUP LOOP!
 void GANTRY::init() {
   // start gantry belt stepper motor
-  // gantry.begin(DIR, STEP, EN, RST, SLP); // DIR, STEP, EN, RST, SLP
-  // gantry.setDirection(DRV8825_CLOCK_WISE);
-  pinMode(DIR, OUTPUT);
-  pinMode(STEP, OUTPUT);
-  pinMode(EN, OUTPUT);
-  pinMode(RST, OUTPUT);
-  pinMode(SLP, OUTPUT);
+  gantry.begin(DIR, STEP, EN, RST, SLP); // DIR, STEP, EN, RST, SLP
+  gantry.setDirection(DRV8825_CLOCK_WISE);
+  gantry.setStepPulseLength(5);
+  gantry.enable();
+  // pinMode(DIR, OUTPUT);
+  // pinMode(STEP, OUTPUT);
+  // pinMode(EN, OUTPUT);
+  // pinMode(RST, OUTPUT);
+  // pinMode(SLP, OUTPUT);
 
-  // SET PINS TO DEFAULT STATE
-  digitalWrite(DIR, HIGH);
-  digitalWrite(STEP, LOW);
-  digitalWrite(EN, LOW);
-  digitalWrite(RST, HIGH);
-  digitalWrite(SLP, LOW);
+  if (!gantry.isEnabled()) {
+    Serial.println("DRV8825 not enabled, exiting...");
+    exit(1);
+  } // if.. enabled
+
+  // // SET PINS TO DEFAULT STATE
+  // digitalWrite(DIR, HIGH);
+  // digitalWrite(STEP, LOW);
+  // digitalWrite(EN, LOW);
+  // digitalWrite(RST, HIGH);
+  // digitalWrite(SLP, LOW);
 
   // check reset pin - most important
-  if (!digitalRead(RST)) { // !gantry.reset()
-    Serial.println("ERROR: RESET pin not set to HIGH!");
-    exit(1);
-  }
+  // if (!digitalRead(RST)) { // !gantry.reset()
+  //   Serial.println("ERROR: RESET pin not set to HIGH!");
+  //   exit(1);
+  // }
 
   // attach pins
   // change pins as needed
@@ -210,9 +255,9 @@ void GANTRY::init() {
   */
 
   // initialize servos and steppers to initial positions
-  grab();    // clamp grippers - grabbing initial marker
-  tool_change.write(TOOL_RETRACT);   // reset position of tool change rack
-  resetPos(0);
+  // grab();    // clamp grippers - grabbing initial marker
+  // tool_change.write(TOOL_RETRACT);   // reset position of tool change rack
+  // resetPos(0);
 }
 
 // move gripper fully to the top of the gantry
@@ -234,9 +279,6 @@ void GANTRY::resetPos(int orientation) {
 
 // gantry moves to an "absolute" position that it needs to move to
 void GANTRY::move(float pos, float speed) {
-  // wake up stepper
-  digitalWrite(SLP, HIGH);
-
   // figure out where marker needs to move to
   float moving = position - pos;
 
@@ -252,9 +294,6 @@ void GANTRY::move(float pos, float speed) {
 
   // update position
   position = pos;
-
-  // have stepper go to sleep
-  digitalWrite(SLP, LOW);
 } // ..move()
 
 // ===== MARKER COMMANDS =====
